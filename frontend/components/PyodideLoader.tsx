@@ -4,6 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { Loader2, Check, AlertCircle } from 'lucide-react';
 import { pyodideRunner } from '@/lib/pyodide-runner';
 
+// When running Playwright tests we don't need the heavy Pyodide
+// initialization. The NEXT_PUBLIC_PYODIDE_MOCK flag skips all network
+// requests and immediately reports that the environment is ready.
+const MOCK_PYODIDE = process.env.NEXT_PUBLIC_PYODIDE_MOCK === 'true';
+
 interface PyodideLoaderProps {
   onReady?: () => void;
 }
@@ -18,10 +23,10 @@ export const PyodideLoader: React.FC<PyodideLoaderProps> = ({ onReady }) => {
       try {
         setStatus('🐍 Loading Pyodide...');
         await pyodideRunner.initialize();
-        
+
         setStatus('✅ Python environment ready!');
         setIsLoading(false);
-        
+
         if (onReady) {
           onReady();
         }
@@ -31,6 +36,14 @@ export const PyodideLoader: React.FC<PyodideLoaderProps> = ({ onReady }) => {
         setIsLoading(false);
       }
     };
+
+    if (MOCK_PYODIDE) {
+      // Skip initialization entirely in mock mode
+      setIsLoading(false);
+      setStatus('✅ Python environment ready!');
+      onReady?.();
+      return;
+    }
 
     // Check if already initialized
     if (pyodideRunner.isReady()) {
@@ -43,6 +56,10 @@ export const PyodideLoader: React.FC<PyodideLoaderProps> = ({ onReady }) => {
       initializePyodide();
     }
   }, [onReady]);
+
+  if (MOCK_PYODIDE) {
+    return null;
+  }
 
   if (!isLoading && !error) {
     return null; // Hide when ready
