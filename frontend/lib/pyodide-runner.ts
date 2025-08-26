@@ -151,7 +151,8 @@ class PyodideRunner {
       batches.push(HATHOR_MODULES.slice(i, i + BATCH_SIZE));
     }
 
-    for (const [batchIndex, batch] of batches.entries()) {
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
       const batchPromises = batch.map(async (filePath) => {
         try {
           const response = await fetch(`${githubBaseUrl}/${filePath}`);

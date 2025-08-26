@@ -40,7 +40,7 @@ class IndexedDBStorage {
       const request = indexedDB.open(this.dbName, this.version);
 
       request.onerror = () => reject(new Error('Failed to open IndexedDB'));
-      
+
       request.onsuccess = () => {
         this.db = request.result;
         resolve();
@@ -48,7 +48,7 @@ class IndexedDBStorage {
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
-        
+
         // Files store
         if (!db.objectStoreNames.contains('files')) {
           const filesStore = db.createObjectStore('files', { keyPath: 'id' });
@@ -84,13 +84,13 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['files'], 'readwrite');
     const store = transaction.objectStore('files');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.put({
         ...file,
         lastModified: Date.now()
       });
-      
+
       request.onsuccess = () => resolve();
       request.onerror = () => reject(new Error('Failed to save file'));
     });
@@ -100,10 +100,10 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['files'], 'readonly');
     const store = transaction.objectStore('files');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.get(id);
-      
+
       request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(new Error('Failed to get file'));
     });
@@ -113,10 +113,10 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['files'], 'readonly');
     const store = transaction.objectStore('files');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.getAll();
-      
+
       request.onsuccess = () => resolve(request.result || []);
       request.onerror = () => reject(new Error('Failed to get files'));
     });
@@ -126,10 +126,10 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['files'], 'readwrite');
     const store = transaction.objectStore('files');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.delete(id);
-      
+
       request.onsuccess = () => resolve();
       request.onerror = () => reject(new Error('Failed to delete file'));
     });
@@ -140,13 +140,13 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['chatSessions'], 'readwrite');
     const store = transaction.objectStore('chatSessions');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.put({
         ...session,
         lastModified: Date.now()
       });
-      
+
       request.onsuccess = () => resolve();
       request.onerror = () => reject(new Error('Failed to save chat session'));
     });
@@ -156,10 +156,10 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['chatSessions'], 'readonly');
     const store = transaction.objectStore('chatSessions');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.get(id);
-      
+
       request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(new Error('Failed to get chat session'));
     });
@@ -170,11 +170,11 @@ class IndexedDBStorage {
     const transaction = db.transaction(['chatSessions'], 'readonly');
     const store = transaction.objectStore('chatSessions');
     const index = store.index('lastModified');
-    
+
     return new Promise((resolve, reject) => {
       // Get sessions sorted by lastModified (most recent first)
       const request = index.getAll();
-      
+
       request.onsuccess = () => {
         const sessions = request.result || [];
         sessions.sort((a, b) => b.lastModified - a.lastModified);
@@ -188,10 +188,10 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['chatSessions'], 'readwrite');
     const store = transaction.objectStore('chatSessions');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.delete(id);
-      
+
       request.onsuccess = () => resolve();
       request.onerror = () => reject(new Error('Failed to delete chat session'));
     });
@@ -202,10 +202,10 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['preferences'], 'readwrite');
     const store = transaction.objectStore('preferences');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.put({ key, value, updated: Date.now() });
-      
+
       request.onsuccess = () => resolve();
       request.onerror = () => reject(new Error('Failed to save preference'));
     });
@@ -215,10 +215,10 @@ class IndexedDBStorage {
     const db = this.ensureDB();
     const transaction = db.transaction(['preferences'], 'readonly');
     const store = transaction.objectStore('preferences');
-    
+
     return new Promise((resolve, reject) => {
       const request = store.get(key);
-      
+
       request.onsuccess = () => {
         const result = request.result;
         resolve(result ? result.value : defaultValue);
@@ -231,11 +231,11 @@ class IndexedDBStorage {
   async clearAllData(): Promise<void> {
     const db = this.ensureDB();
     const transaction = db.transaction(['files', 'chatSessions', 'preferences'], 'readwrite');
-    
+
     return new Promise((resolve, reject) => {
       let completed = 0;
       const stores = ['files', 'chatSessions', 'preferences'];
-      
+
       const checkComplete = () => {
         completed++;
         if (completed === stores.length) {
@@ -254,7 +254,7 @@ class IndexedDBStorage {
   async getStorageInfo(): Promise<{ files: number; sessions: number; size?: number }> {
     const db = this.ensureDB();
     const transaction = db.transaction(['files', 'chatSessions'], 'readonly');
-    
+
     return new Promise((resolve, reject) => {
       let filesCount = 0;
       let sessionsCount = 0;
