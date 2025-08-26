@@ -5,6 +5,7 @@ import { Play, Settings } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
+import { generateFrontendPrompt } from '@/utils/promptGenerator';
 
 interface MethodExecutorProps {
   blueprintId?: string;
@@ -78,6 +79,21 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
       blueprint_1: '3cb032600bdf7db784800e4ea911b10676fa2f67591f82bb62628c234e771595',
       blueprint_2: '4dc143711cef8ec895911f5fb822c21787fa3f78502f93cc73739d345f882606',
     },
+  };
+
+  const handleGeneratePrompt = () => {
+    if (!activeFile) {
+      addConsoleMessage('error', 'No contract file loaded.');
+      return;
+    }
+    if (methodDefinitions.length === 0) {
+      addConsoleMessage('error', 'No methods found to generate prompt.');
+      return;
+    }
+    const prompt = generateFrontendPrompt(activeFile.name.replace('.py', ''), methodDefinitions);
+    navigator.clipboard.writeText(prompt)
+      .then(() => addConsoleMessage('success', 'Prompt copied to clipboard'))
+      .catch((err) => addConsoleMessage('error', `Failed to copy prompt: ${err}`));
   };
 
 
@@ -255,7 +271,15 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
   return (
     <div className="h-full bg-gray-800 border-r border-gray-700 p-4 overflow-y-auto">
       <div className="flex flex-col gap-4">
-        <h3 className="text-lg font-semibold text-white mb-2">Contract Methods</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-lg font-semibold text-white">Contract Methods</h3>
+          <button
+            onClick={handleGeneratePrompt}
+            className="px-2 py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded"
+          >
+            Generate Prompt
+          </button>
+        </div>
         {contractInstance && (
           <div className="bg-green-900/30 border border-green-700 rounded p-2 text-sm">
             <span className="text-green-400">✅ Contract Initialized</span>
