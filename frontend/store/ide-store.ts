@@ -29,48 +29,48 @@ interface IDEState {
   // Files
   files: File[];
   activeFileId: string | null;
-  
+
   // Console
   consoleMessages: ConsoleMessage[];
   messageIdCounter: number;
-  
+
   // Contracts
   compiledContracts: Contract[];
   contractInstances: ContractInstance[]; // Track initialized contract instances
-  
+
   // Chat Sessions
   chatSessions: ChatSession[];
   activeChatSessionId: string | null;
-  
+
   // UI State
   isCompiling: boolean;
   isExecuting: boolean;
   isStorageInitialized: boolean;
-  
+
   // Actions
   addFile: (file: File) => void;
   updateFile: (id: string, content: string) => void;
   deleteFile: (id: string) => void;
   setActiveFile: (id: string) => void;
-  
+
   addConsoleMessage: (type: ConsoleMessage['type'], message: string) => void;
   clearConsole: () => void;
-  
+
   addCompiledContract: (contract: Contract) => void;
   addContractInstance: (instance: ContractInstance) => void;
   getContractInstance: (blueprintId: string) => ContractInstance | null;
   clearContractInstances: () => void;
-  
+
   setIsCompiling: (value: boolean) => void;
   setIsExecuting: (value: boolean) => void;
-  
+
   // Chat session actions
   createChatSession: () => string;
   addChatMessage: (sessionId: string, message: ChatMessage) => void;
   getChatSession: (id: string) => ChatSession | null;
   setActiveChatSession: (id: string) => void;
   deleteChatSession: (id: string) => void;
-  
+
   // Storage operations
   initializeStore: () => Promise<void>;
   loadFilesFromStorage: () => Promise<void>;
@@ -231,19 +231,19 @@ __blueprint__ = LiquidityPool`,
     },
   ],
   activeFileId: '1',
-  
+
   consoleMessages: [],
   messageIdCounter: 0,
   compiledContracts: [],
   contractInstances: [],
-  
+
   chatSessions: [],
   activeChatSessionId: null,
-  
+
   isCompiling: false,
   isExecuting: false,
   isStorageInitialized: false,
-  
+
   // Actions
   addFile: (file) => {
     set((state) => ({
@@ -256,7 +256,7 @@ __blueprint__ = LiquidityPool`,
       state.saveFileToStorage(file).catch(console.error);
     }
   },
-  
+
   updateFile: (id, content) => {
     set((state) => ({
       files: state.files.map((f) =>
@@ -272,7 +272,7 @@ __blueprint__ = LiquidityPool`,
       }
     }
   },
-  
+
   deleteFile: (id) => {
     set((state) => ({
       files: state.files.filter((f) => f.id !== id),
@@ -287,7 +287,7 @@ __blueprint__ = LiquidityPool`,
       state.deleteFileFromStorage(id).catch(console.error);
     }
   },
-  
+
   setActiveFile: (id) => {
     set(() => ({
       activeFileId: id,
@@ -298,7 +298,7 @@ __blueprint__ = LiquidityPool`,
       storage.setPreference('lastActiveFileId', id).catch(console.error);
     }
   },
-  
+
   addConsoleMessage: (type, message) =>
     set((state) => ({
       consoleMessages: [
@@ -312,43 +312,43 @@ __blueprint__ = LiquidityPool`,
       ],
       messageIdCounter: state.messageIdCounter + 1,
     })),
-  
+
   clearConsole: () =>
     set(() => ({
       consoleMessages: [],
       messageIdCounter: 0,
     })),
-  
+
   addCompiledContract: (contract) =>
     set((state) => ({
       compiledContracts: [...state.compiledContracts, contract],
     })),
-  
+
   addContractInstance: (instance) =>
     set((state) => ({
       contractInstances: [...state.contractInstances.filter(c => c.blueprintId !== instance.blueprintId), instance],
     })),
-  
+
   getContractInstance: (blueprintId) => {
     const state = get();
     return state.contractInstances.find(instance => instance.blueprintId === blueprintId) || null;
   },
-  
+
   clearContractInstances: () =>
     set(() => ({
       contractInstances: [],
     })),
-  
+
   setIsCompiling: (value) =>
     set(() => ({
       isCompiling: value,
     })),
-  
+
   setIsExecuting: (value) =>
     set(() => ({
       isExecuting: value,
     })),
-  
+
   // Chat session actions
   createChatSession: () => {
     const sessionId = Date.now().toString();
@@ -359,18 +359,18 @@ __blueprint__ = LiquidityPool`,
       lastModified: Date.now(),
       title: 'New Chat Session'
     };
-    
+
     set((state) => ({
       chatSessions: [...state.chatSessions, newSession],
       activeChatSessionId: sessionId,
     }));
-    
+
     // Save to storage
     const state = get();
     if (state.isStorageInitialized) {
       storage.saveChatSession(newSession).catch(console.error);
     }
-    
+
     return sessionId;
   },
 
@@ -379,14 +379,14 @@ __blueprint__ = LiquidityPool`,
       chatSessions: state.chatSessions.map(session =>
         session.id === sessionId
           ? {
-              ...session,
-              messages: [...session.messages, message],
-              lastModified: Date.now(),
-            }
+            ...session,
+            messages: [...session.messages, message],
+            lastModified: Date.now(),
+          }
           : session
       ),
     }));
-    
+
     // Save to storage
     const state = get();
     if (state.isStorageInitialized) {
@@ -406,7 +406,7 @@ __blueprint__ = LiquidityPool`,
     set(() => ({
       activeChatSessionId: id,
     }));
-    
+
     // Save active session preference
     const state = get();
     if (state.isStorageInitialized) {
@@ -419,25 +419,25 @@ __blueprint__ = LiquidityPool`,
       chatSessions: state.chatSessions.filter(session => session.id !== id),
       activeChatSessionId: state.activeChatSessionId === id ? null : state.activeChatSessionId,
     }));
-    
+
     // Delete from storage
     const state = get();
     if (state.isStorageInitialized) {
       storage.deleteChatSession(id).catch(console.error);
     }
   },
-  
+
   // Storage operations
   initializeStore: async () => {
     try {
       await initStorage();
       set({ isStorageInitialized: true });
-      
+
       // Load files from storage
       const state = get();
       await state.loadFilesFromStorage();
       await state.loadChatSessionsFromStorage();
-      
+
       console.log('IDE store initialized with persistent storage');
     } catch (error) {
       console.error('Failed to initialize storage:', error);
@@ -445,11 +445,11 @@ __blueprint__ = LiquidityPool`,
       set({ isStorageInitialized: false });
     }
   },
-  
+
   loadFilesFromStorage: async () => {
     try {
       const storedFiles = await storage.getAllFiles();
-      
+
       if (storedFiles.length > 0) {
         // Convert StoredFile to File format
         const files: File[] = storedFiles.map(stored => ({
@@ -459,16 +459,16 @@ __blueprint__ = LiquidityPool`,
           language: stored.name.endsWith('.py') ? 'python' : 'text',
           path: `/contracts/${stored.name}`,
         }));
-        
+
         // Get last active file ID from preferences
         const lastActiveFileId = await storage.getPreference('lastActiveFileId', files[0]?.id || null);
         const validActiveFileId = files.find(f => f.id === lastActiveFileId)?.id || files[0]?.id || null;
-        
+
         set({
           files,
           activeFileId: validActiveFileId,
         });
-        
+
         console.log(`Loaded ${files.length} files from storage`);
       } else {
         // First time - save default files to storage
@@ -482,7 +482,7 @@ __blueprint__ = LiquidityPool`,
       console.error('Failed to load files from storage:', error);
     }
   },
-  
+
   saveFileToStorage: async (file: File) => {
     try {
       const storedFile: StoredFile = {
@@ -493,19 +493,19 @@ __blueprint__ = LiquidityPool`,
         created: Date.now(), // This should ideally come from existing stored file
         type: file.name.endsWith('.py') ? 'contract' : 'other',
       };
-      
+
       // Check if file exists to preserve created date
       const existingFile = await storage.getFile(file.id);
       if (existingFile) {
         storedFile.created = existingFile.created;
       }
-      
+
       await storage.saveFile(storedFile);
     } catch (error) {
       console.error('Failed to save file to storage:', error);
     }
   },
-  
+
   deleteFileFromStorage: async (id: string) => {
     try {
       await storage.deleteFile(id);
@@ -517,17 +517,17 @@ __blueprint__ = LiquidityPool`,
   loadChatSessionsFromStorage: async () => {
     try {
       const storedSessions = await storage.getAllChatSessions();
-      
+
       if (storedSessions.length > 0) {
         // Get active session ID from preferences
         const activeSessionId = await storage.getPreference('activeChatSessionId', null);
         const validActiveSessionId = storedSessions.find(s => s.id === activeSessionId)?.id || null;
-        
+
         set({
           chatSessions: storedSessions,
           activeChatSessionId: validActiveSessionId,
         });
-        
+
         console.log(`Loaded ${storedSessions.length} chat sessions from storage`);
       } else {
         console.log('No chat sessions found in storage');

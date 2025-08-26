@@ -82,12 +82,12 @@ export const contractsApi = {
     if (USE_BROWSER_EXECUTION) {
       // Use browser-based Pyodide execution
       await pyodideRunner.initialize();
-      
+
       const result = await pyodideRunner.compileContract(
-        request.code, 
+        request.code,
         request.blueprint_name || 'Contract'
       );
-      
+
       return {
         success: result.success,
         blueprint_id: result.blueprint_id,
@@ -106,7 +106,7 @@ export const contractsApi = {
     if (USE_BROWSER_EXECUTION) {
       // Use browser-based Pyodide execution
       await pyodideRunner.initialize();
-      
+
       const result = await pyodideRunner.executeContract({
         contract_id: request.contract_id,
         method_name: request.method_name,
@@ -115,7 +115,7 @@ export const contractsApi = {
         caller_address: request.caller_address || 'a1b2c3d4e5f6789012345678901234567890abcdef12345678',
         method_type: request.method_type
       });
-      
+
       return {
         success: result.success,
         result: result.result,
@@ -183,9 +183,9 @@ export const validationApi = {
     if (USE_BROWSER_EXECUTION) {
       // Use browser-based validation
       await pyodideRunner.initialize();
-      
+
       const result = await pyodideRunner.validateContract(request.code);
-      
+
       return {
         valid: result.valid,
         errors: result.errors.map(error => ({
