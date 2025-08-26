@@ -1175,131 +1175,42 @@ json.dumps(result)
         blueprint_id = stored_instance.blueprint_id;
       }
 
-      // Execute the method
-      const result = this.pyodide.runPython(`
+        // Execute the method using the real nano contracts runner when possible
+        const result = this.pyodide.runPython(`
 try:
-    # Get the blueprint class
+    from hathor.nanocontracts.runner import Runner as NanoContractRunner
+    runner_data = _contract_instances.get('${contract_instance_id}', {})
+    runner = runner_data.get('runner')
     blueprint_class = _contract_registry.get('${blueprint_id}')
     if blueprint_class is None:
         raise Exception("Blueprint not found: ${blueprint_id}")
-    
-    # Get or create contract instance
-    if '${method_name}' == 'initialize':
-        # Create new instance with proper environment
-        try:
-            from hathor.nanocontracts.blueprint_env import BlueprintEnvironment
-            
-            # Create mock objects for BlueprintEnvironment
-            class MockRunner:
-                pass
-            
-            class MockNCLogger:
-                def info(self, *args, **kwargs): pass
-                def error(self, *args, **kwargs): pass
-                def warning(self, *args, **kwargs): pass
-                def debug(self, *args, **kwargs): pass
-            
-            class MockNCContractStorage:
-                def __init__(self):
-                    self._storage = {}
-                
-                def put_obj(self, key, nc_type, obj):
-                    """Store an object by key with NCType serialization"""
-                    self._storage[key] = obj
-                    
-                def get_obj(self, key, nc_type, *, default=None):
-                    """Get an object by key with NCType deserialization"""
-                    return self._storage.get(key, default)
-                    
-                def del_obj(self, key):
-                    """Delete an object by key"""
-                    if key in self._storage:
-                        del self._storage[key]
-                        
-                def has_obj(self, key):
-                    """Check if object exists by key"""
-                    return key in self._storage
-                    
-                def clear(self):
-                    """Clear all storage"""
-                    self._storage.clear()
-            
-            # Create environment with mock dependencies
-            env = BlueprintEnvironment(
-                runner=MockRunner(),
-                nc_logger=MockNCLogger(), 
-                storage=MockNCContractStorage()
-            )
-            contract_instance = blueprint_class(env)
-        except Exception as e:
-            print(f"⚠️ Failed to create real BlueprintEnvironment: {e}")
-            # Fallback: create minimal mock environment
-            class MockBlueprintEnvironment:
-                pass
-            contract_instance = blueprint_class(MockBlueprintEnvironment())
-        
-        instance_data = {
-            'instance': contract_instance,
-            'blueprint_id': '${blueprint_id}',
-            'state': {}
-        }
-        _contract_instances['${contract_instance_id}'] = instance_data
-    else:
-        # Get existing instance
-        instance_data = _contract_instances.get('${contract_id}')
-        if instance_data is None:
-            raise Exception("Contract instance not found: ${contract_id}")
-        contract_instance = instance_data['instance']
-    
-    # Create context
+
+    if runner is None:
+        runner = NanoContractRunner()
+        _contract_instances['${contract_instance_id}'] = {'runner': runner}
+
     context = _create_context('${caller_address}')
-    
-    # Get the method
-    if not hasattr(contract_instance, '${method_name}'):
-        raise Exception(f"Method '${method_name}' not found")
-    
-    method = getattr(contract_instance, '${method_name}')
-    
-    # Prepare arguments
     args = ${JSON.stringify(args)}
-    
-    # Check if method has proper decorator attributes using Hathor utilities
-    from hathor.nanocontracts.utils import is_nc_public_method, is_nc_view_method
-    
-    is_public = is_nc_public_method(method)
-    is_view = is_nc_view_method(method)
-    
-    if not is_public and not is_view:
-        raise Exception(f"Method '${method_name}' is not decorated with @public or @view")
-    
-    # Execute method
-    if is_public:
-        # Public method requires context
-        if '${method_name}' == 'initialize':
-            result_value = method(context, *args) if args else method(context)
-            execution_result = {
-                'success': True,
-                'result': {'contract_id': '${contract_instance_id}'},
-                'output': 'Contract initialized successfully'
-            }
-        else:
-            result_value = method(context, *args) if args else method(context)
-            execution_result = {
-                'success': True,
-                'result': result_value,
-                'output': 'Method executed successfully'
-            }
-    elif is_view:
-        # View method doesn't need context
-        result_value = method(*args) if args else method()
+
+    if '${method_name}' == 'initialize':
+        contract_instance = runner.create_instance(blueprint_class, context, *args)
+        _contract_instances['${contract_instance_id}']['instance'] = contract_instance
+        execution_result = {
+            'success': True,
+            'result': {'contract_id': '${contract_instance_id}'},
+            'output': 'Contract initialized successfully'
+        }
+    else:
+        contract_data = _contract_instances.get('${contract_id}')
+        if contract_data is None or 'instance' not in contract_data:
+            raise Exception("Contract instance not found: ${contract_id}")
+        contract_instance = contract_data['instance']
+        result_value = runner.execute_method(contract_instance, '${method_name}', context, *args)
         execution_result = {
             'success': True,
             'result': result_value,
-            'output': 'View method executed successfully'
+            'output': 'Method executed successfully'
         }
-    else:
-        raise Exception(f"Method '${method_name}' is not decorated with @public or @view")
-    
 except Exception as e:
     import traceback
     traceback_str = traceback.format_exc()
