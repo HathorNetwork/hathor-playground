@@ -3,7 +3,7 @@ AI Assistant API router - handles AI assistant requests with Hathor-specific kno
 """
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import structlog
 import openai
 import os
@@ -82,9 +82,9 @@ class ChatRequest(BaseModel):
     message: str
     current_file_content: Optional[str] = None
     current_file_name: Optional[str] = None
-    console_messages: List[str] = []
+    console_messages: List[str] = Field(default_factory=list)
     context: Optional[Dict[str, Any]] = None
-    conversation_history: List[ChatMessage] = []  # Recent conversation history
+    conversation_history: List[ChatMessage] = Field(default_factory=list)  # Recent conversation history
 
 
 class ChatResponse(BaseModel):
