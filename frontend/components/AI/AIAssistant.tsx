@@ -244,7 +244,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
         {messages.length === 0 && (
           <div className="text-center text-gray-400 text-sm mt-8">
             <div className="mb-2">🤖</div>
-            <p>Hi! I'm your Hathor AI assistant!</p>
+            <p>Hi! I&apos;m your Hathor AI assistant!</p>
             <p className="text-xs mt-1">Ask me about nano contracts, debugging, or best practices!</p>
           </div>
         )}

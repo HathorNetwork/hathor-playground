@@ -206,7 +206,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             </>
           )}
           {' • '}
-          <span className="text-gray-400">Click "Apply" to accept these changes or "Reject" to dismiss</span>
+          <span className="text-gray-400">Click &quot;Apply&quot; to accept these changes or &quot;Reject&quot; to dismiss</span>
         </div>
       </div>
     </div>
