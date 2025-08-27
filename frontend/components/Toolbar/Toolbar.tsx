@@ -1,12 +1,32 @@
 'use client';
 
 import React from 'react';
-import { Play, Zap, FileCode, Settings, HelpCircle, Loader2 } from 'lucide-react';
+import {
+  Play,
+  Zap,
+  FileCode,
+  Settings,
+  HelpCircle,
+  Loader2,
+  GitCommit,
+  Upload,
+  History,
+  CornerUpLeft,
+  GitBranch,
+  GitBranchPlus,
+} from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface ToolbarProps {
   onCompile: () => void;
   onExecute: () => void;
+  onCommit: () => void;
+  onPush: () => void;
+  onHistory: () => void;
+  onCheckout: () => void;
+  onListBranches: () => void;
+  onCreateBranch: () => void;
+  onSwitchBranch: () => void;
   isCompiling: boolean;
   isExecuting: boolean;
   fileName?: string;
@@ -15,6 +35,13 @@ interface ToolbarProps {
 export const Toolbar: React.FC<ToolbarProps> = ({
   onCompile,
   onExecute,
+  onCommit,
+  onPush,
+  onHistory,
+  onCheckout,
+  onListBranches,
+  onCreateBranch,
+  onSwitchBranch,
   isCompiling,
   isExecuting,
   fileName,
@@ -74,6 +101,69 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <Play size={16} />
             )}
             {isExecuting ? 'Executing...' : 'Quick Execute'}
+          </button>
+
+          {/* Commit Button */}
+          <button
+            onClick={onCommit}
+            className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium bg-purple-600 text-white hover:bg-purple-700"
+          >
+            <GitCommit size={16} />
+            Commit
+          </button>
+
+          {/* Push Button */}
+          <button
+            onClick={onPush}
+            className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium bg-orange-600 text-white hover:bg-orange-700"
+          >
+            <Upload size={16} />
+            Push
+          </button>
+
+          {/* History Button */}
+          <button
+            onClick={onHistory}
+            className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            <History size={16} />
+            History
+          </button>
+
+          {/* Checkout Button */}
+          <button
+            onClick={onCheckout}
+            className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium bg-pink-600 text-white hover:bg-pink-700"
+          >
+            <CornerUpLeft size={16} />
+            Checkout
+          </button>
+
+          {/* List Branches Button */}
+          <button
+            onClick={onListBranches}
+            className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium bg-gray-600 text-white hover:bg-gray-700"
+          >
+            <GitBranch size={16} />
+            Branches
+          </button>
+
+          {/* Create Branch Button */}
+          <button
+            onClick={onCreateBranch}
+            className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium bg-lime-600 text-white hover:bg-lime-700"
+          >
+            <GitBranchPlus size={16} />
+            New Branch
+          </button>
+
+          {/* Switch Branch Button */}
+          <button
+            onClick={onSwitchBranch}
+            className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium bg-teal-600 text-white hover:bg-teal-700"
+          >
+            <GitBranch size={16} />
+            Switch Branch
           </button>
 
           <div className="border-l border-gray-600 h-6 mx-2" />
