@@ -4,6 +4,7 @@
  */
 
 import { HATHOR_MODULES } from './hathor-modules';
+import { MockLoader } from './mock-loader';
 
 interface ExecutionResult {
   success: boolean;
@@ -151,7 +152,8 @@ class PyodideRunner {
       batches.push(HATHOR_MODULES.slice(i, i + BATCH_SIZE));
     }
 
-    for (const [batchIndex, batch] of batches.entries()) {
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
       const batchPromises = batch.map(async (filePath) => {
         try {
           const response = await fetch(`${githubBaseUrl}/${filePath}`);
@@ -162,36 +164,9 @@ class PyodideRunner {
           let content = await response.text();
           
           // Special handling for problematic modules
-          if (filePath === 'hathor/version.py') {
+          if (MockLoader.getMockForPath(filePath)) {
             // Replace subprocess-based version detection with static version
-            content = `# Browser-compatible version module
-import re
-try:
-    import structlog
-    logger = structlog.get_logger()
-except ImportError:
-    class MinimalLogger:
-        def info(self, *args, **kwargs): pass
-        def error(self, *args, **kwargs): pass
-        def warning(self, *args, **kwargs): pass
-        def debug(self, *args, **kwargs): pass
-    logger = MinimalLogger()
-
-BASE_VERSION = '0.66.0'
-DEFAULT_VERSION_SUFFIX = "local"
-BUILD_VERSION_FILE_PATH = "./BUILD_VERSION"
-
-# Valid formats: 1.2.3, 1.2.3-rc.1 and nightly-ab49c20f
-BUILD_VERSION_REGEX = r"^(\\d+\\.\\d+\\.\\d+(-(rc|alpha|beta)\\.\\d+)?|nightly-[a-f0-9]{7,8})$"
-
-__version__ = '1.0.0-browser'
-MAJOR = 1
-MINOR = 0
-PATCH = 0
-
-def _get_version():
-    return __version__
-`;
+            content = MockLoader.getMockForPath(filePath)!;
           }
           
           // Skip modules that are known to cause issues in browser
@@ -208,174 +183,9 @@ def _get_version():
           
           if (problematicModules.some(mod => filePath.includes(mod))) {
             // Create stub modules with minimal functionality
-            if (filePath.includes('hathor/nanocontracts/utils.py')) {
+            if (MockLoader.getMockForPath(filePath)) {
               // Provide the actual utils functions from the real module
-              content = `# Stub module for browser compatibility with real functions
-import hashlib
-from typing import Callable
-from hathor.nanocontracts.types import NC_METHOD_TYPE_ATTR, NCMethodType
-
-# Constants
-CHILD_CONTRACT_ID_PREFIX = b'child-contract'
-CHILD_TOKEN_ID_PREFIX = b'child-token'
-
-def is_nc_public_method(method: Callable) -> bool:
-    """Return True if the method is nc_public."""
-    return getattr(method, NC_METHOD_TYPE_ATTR, None) is NCMethodType.PUBLIC
-
-def is_nc_view_method(method: Callable) -> bool:
-    """Return True if the method is nc_view."""
-    return getattr(method, NC_METHOD_TYPE_ATTR, None) is NCMethodType.VIEW
-
-def is_nc_fallback_method(method: Callable) -> bool:
-    """Return True if the method is nc_fallback."""
-    return getattr(method, NC_METHOD_TYPE_ATTR, None) is NCMethodType.FALLBACK
-
-def load_builtin_blueprint_for_ocb(filename: str, blueprint_name: str, module=None) -> str:
-    """Get blueprint code from a file."""
-    # Mock implementation
-    return f"# Mock blueprint for {blueprint_name}\\npass"
-
-def derive_child_contract_id(parent_id, salt: bytes, blueprint_id):
-    """Derives the contract id for a nano contract created by another (parent) contract."""
-    h = hashlib.sha256()
-    h.update(CHILD_CONTRACT_ID_PREFIX)
-    h.update(parent_id)
-    h.update(salt)
-    h.update(blueprint_id)
-    return h.digest()
-
-def derive_child_token_id(parent_id, token_symbol: str):
-    """Derive the token id for a token created by a (parent) contract."""
-    h = hashlib.sha256()
-    h.update(CHILD_TOKEN_ID_PREFIX)
-    h.update(parent_id)
-    h.update(token_symbol.encode('utf-8'))
-    return h.digest()
-
-# Mock signing functions that would use cryptography/pycoin
-def sign_openssl(nano_header, privkey):
-    """Mock sign function."""
-    pass
-
-def sign_pycoin(nano_header, privkey):
-    """Mock sign function.""" 
-    pass
-
-def sign_openssl_multisig(nano_header, required_count, redeem_pubkey_bytes, sign_privkeys):
-    """Mock multisig sign function."""
-    pass
-`;
-            } else if (filePath.includes('hathor/nanocontracts/rng.py')) {
-              // Provide a NanoRNG stub with the actual interface
-              content = `# Stub module for browser compatibility
-import random
-from typing import Sequence, TypeVar
-
-T = TypeVar('T')
-
-class NanoRNG:
-    """Mock implementation of deterministic RNG for browser compatibility."""
-    
-    def __init__(self, seed: bytes) -> None:
-        self.__seed = seed
-        # Use Python's random with a deterministic seed derived from the input
-        seed_int = int.from_bytes(seed[:8], byteorder='little') if len(seed) >= 8 else 0
-        self._rng = random.Random(seed_int)
-    
-    @property
-    def seed(self):
-        """Return the seed used to create the RNG."""
-        return self.__seed
-    
-    def randbytes(self, size: int) -> bytes:
-        """Return a random string of bytes."""
-        return bytes([self._rng.randint(0, 255) for _ in range(size)])
-    
-    def randbits(self, bits: int) -> int:
-        """Return a random integer in the range [0, 2**bits)."""
-        return self._rng.getrandbits(bits)
-    
-    def randbelow(self, n: int) -> int:
-        """Return a random integer in the range [0, n)."""
-        return self._rng.randrange(n)
-    
-    def randrange(self, start: int, stop: int, step: int = 1) -> int:
-        """Return a random integer in the range [start, stop) with a given step."""
-        return self._rng.randrange(start, stop, step)
-    
-    def randint(self, a: int, b: int) -> int:
-        """Return a random integer in the range [a, b]."""
-        return self._rng.randint(a, b)
-    
-    def choice(self, seq: Sequence[T]) -> T:
-        """Choose a random element from a non-empty sequence."""
-        return self._rng.choice(seq)
-    
-    def random(self) -> float:
-        """Return a random float in the range [0, 1)."""
-        return self._rng.random()
-`;
-            } else if (filePath.includes('hathor/reactor/reactor.py')) {
-              // Provide a minimal reactor stub with the required functions
-              content = `# Stub module for browser compatibility
-from structlog import get_logger
-
-logger = get_logger()
-
-class MockReactorProtocol:
-    def __init__(self):
-        pass
-    
-    def callLater(self, delay, func, *args, **kwargs):
-        return None
-    
-    def stop(self):
-        pass
-
-_reactor = None
-
-def get_global_reactor():
-    global _reactor
-    if _reactor is None:
-        _reactor = MockReactorProtocol()
-    return _reactor
-
-def initialize_global_reactor(use_asyncio_reactor=False):
-    global _reactor
-    if _reactor is None:
-        _reactor = MockReactorProtocol()
-    return _reactor
-`;
-            } else if (filePath.includes('hathor/nanocontracts/on_chain_blueprint.py')) {
-              // Provide a minimal on_chain_blueprint stub with OnChainBlueprint class
-              content = `# Stub module for browser compatibility
-from hathor.transaction import Transaction
-
-# Constants from the original module
-ON_CHAIN_BLUEPRINT_VERSION = 1
-BLUEPRINT_CLASS_NAME = '__blueprint__'
-PYTHON_CODE_COMPAT_VERSION = (3, 11)
-MAX_COMPRESSION_LEVEL = 9
-
-class OnChainBlueprint(Transaction):
-    def __init__(self, *args, **kwargs):
-        # Mock initialization without calling parent
-        pass
-    
-    def blueprint_id(self):
-        return b'mock_blueprint_id'
-    
-    def get_blueprint_class(self):
-        from hathor.nanocontracts.blueprint import Blueprint
-        return Blueprint
-    
-    def get_method(self, method_name):
-        class MockMethod:
-            def __init__(self, name):
-                self.name = name
-        return MockMethod(method_name)
-`;
+              content = MockLoader.getMockForPath(filePath)!;
             } else {
               content = `# Stub module for browser compatibility\npass`;
             }
@@ -540,33 +350,13 @@ def _create_context(caller_address_hex):
     """Create context for contract execution using real Hathor Context"""
     from hathor.nanocontracts.context import Context
     from hathor.nanocontracts.types import Address
-    from hathor.nanocontracts.vertex_data import VertexData, BlockData
-    from hathor.types import VertexId
     
     caller_hash = _create_address_from_hex(caller_address_hex)
     # CallerId is a TypeAlias for Address | ContractId, so we use Address directly
     caller_id = Address(caller_hash)
     
-    # Create a VertexData instance directly with minimal required fields
-    # Ensure the hash is bytes, not an Address object
-    vertex_hash = caller_hash if isinstance(caller_hash, bytes) else bytes(caller_hash)
-    vertex_data = VertexData(
-        version=None,  # TxVersion - can be None for mock
-        hash=vertex_hash,
-        nonce=0,
-        signal_bits=0,
-        weight=1.0,
-        inputs=(),
-        outputs=(),
-        tokens=(),
-        parents=(),
-        block=BlockData(hash=VertexId(b''), timestamp=0, height=0),
-        headers=()
-    )
-    
     return Context(
         actions=[],  # Empty actions for basic method calls
-        vertex=vertex_data,
         caller_id=caller_id,
         timestamp=int(__import__('time').time())
     )
