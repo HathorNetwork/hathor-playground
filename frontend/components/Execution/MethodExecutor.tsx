@@ -3,9 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Play, Settings } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
-import { contractsApi } from '@/lib/api';
+import { contractsApi, promptApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
-import { generateFrontendPrompt } from '@/utils/promptGenerator';
+import { PromptEditorModal } from './PromptEditorModal';
 
 interface MethodExecutorProps {
   blueprintId?: string;
@@ -16,7 +16,19 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
-  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance } = useIDEStore();
+  const {
+    addConsoleMessage,
+    files,
+    activeFileId,
+    getContractInstance,
+    addContractInstance,
+    frontendPrompt,
+    setFrontendPrompt,
+  } = useIDEStore();
+
+  const [isPromptOpen, setIsPromptOpen] = useState(false);
+  const [localPrompt, setLocalPrompt] = useState('');
+  const [isPromptLoading, setIsPromptLoading] = useState(false);
 
   // Get current file content to parse methods
   const activeFile = files.find((f: File) => f.id === activeFileId);
@@ -81,19 +93,45 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     },
   };
 
-  const handleGeneratePrompt = () => {
-    if (!activeFile) {
-      addConsoleMessage('error', 'No contract file loaded.');
-      return;
+  const openPromptEditor = () => {
+    setIsPromptOpen(true);
+  };
+
+  useEffect(() => {
+    const fetchPrompt = async () => {
+      if (!activeFile) return;
+      if (frontendPrompt) {
+        setLocalPrompt(frontendPrompt);
+        return;
+      }
+      setIsPromptLoading(true);
+      try {
+        const prompt = await promptApi.generatePrompt(
+          activeFile.name.replace('.py', ''),
+          methodDefinitions
+        );
+        setLocalPrompt(prompt);
+        setFrontendPrompt(prompt);
+      } catch (err) {
+        addConsoleMessage('error', 'Failed to generate prompt');
+      } finally {
+        setIsPromptLoading(false);
+      }
+    };
+    if (isPromptOpen) {
+      fetchPrompt();
     }
-    if (methodDefinitions.length === 0) {
-      addConsoleMessage('error', 'No methods found to generate prompt.');
-      return;
-    }
-    const prompt = generateFrontendPrompt(activeFile.name.replace('.py', ''), methodDefinitions);
-    navigator.clipboard.writeText(prompt)
+  }, [isPromptOpen, activeFile, methodDefinitions, frontendPrompt, setFrontendPrompt, addConsoleMessage]);
+
+  const handleCopyPrompt = () => {
+    navigator.clipboard.writeText(localPrompt)
       .then(() => addConsoleMessage('success', 'Prompt copied to clipboard'))
       .catch((err) => addConsoleMessage('error', `Failed to copy prompt: ${err}`));
+  };
+
+  const handleExportLovable = () => {
+    const url = `https://lovable.dev?prompt=${encodeURIComponent(localPrompt)}`;
+    window.open(url, '_blank');
   };
 
 
@@ -269,15 +307,16 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
   }
 
   return (
-    <div className="h-full bg-gray-800 border-r border-gray-700 p-4 overflow-y-auto">
-      <div className="flex flex-col gap-4">
+    <>
+      <div className="h-full bg-gray-800 border-r border-gray-700 p-4 overflow-y-auto">
+        <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-lg font-semibold text-white">Contract Methods</h3>
           <button
-            onClick={handleGeneratePrompt}
+            onClick={openPromptEditor}
             className="px-2 py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded"
           >
-            Generate Prompt
+            Prompt Editor
           </button>
         </div>
         {contractInstance && (
@@ -480,5 +519,18 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
         </button>
       </div>
     </div>
+    <PromptEditorModal
+      isOpen={isPromptOpen}
+      prompt={localPrompt}
+      isLoading={isPromptLoading}
+      onChange={setLocalPrompt}
+      onClose={() => {
+        setIsPromptOpen(false);
+        setFrontendPrompt(localPrompt);
+      }}
+      onCopy={handleCopyPrompt}
+      onExport={handleExportLovable}
+    />
+    </>
   );
 };

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 import structlog
 
 from api.ai_assistant import router as ai_assistant_router
+from api.frontend_prompt import router as frontend_prompt_router
 
 # Load environment variables from .env file
 load_dotenv()
@@ -58,6 +59,9 @@ app.add_middleware(
 # Include routers
 app.include_router(
     ai_assistant_router, prefix="/api/ai", tags=["ai-assistant"]
+)
+app.include_router(
+    frontend_prompt_router, prefix="/api/frontend", tags=["frontend"]
 )
 
 
