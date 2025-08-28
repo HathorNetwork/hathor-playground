@@ -103,6 +103,12 @@ class HathorSettings:
             return 1000000  # Default limits
         else:
             return None
+    
+    @classmethod
+    def from_yaml(cls, yaml_content=None, **kwargs):
+        """Mock from_yaml class method that returns a HathorSettings instance"""
+        # Ignore yaml content and just return a default settings instance
+        return cls()
 
 # Create default settings instance
 _settings = HathorSettings()

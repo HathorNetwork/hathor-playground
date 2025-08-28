@@ -346,19 +346,58 @@ def _create_address_from_hex(hex_str):
     else:
         raise ValueError(f"Invalid address length: {len(hex_str)} chars")
 
-def _create_context(caller_address_hex):
+def _create_context(
+    caller_address_hex=None,
+    actions=None,
+    vertex=None,
+    timestamp=None
+):
     """Create context for contract execution using real Hathor Context"""
     from hathor.nanocontracts.context import Context
-    from hathor.nanocontracts.types import Address
+    from hathor.nanocontracts.types import Address, VertexId
+    from hathor.nanocontracts.vertex_data import BlockData, VertexData
     
-    caller_hash = _create_address_from_hex(caller_address_hex)
-    # CallerId is a TypeAlias for Address | ContractId, so we use Address directly
-    caller_id = Address(caller_hash)
+    # Handle caller_id
+    if caller_address_hex:
+        caller_hash = _create_address_from_hex(caller_address_hex)
+        caller_id = Address(caller_hash)
+    else:
+        # Generate random address if none provided (like gen_random_address())
+        import random
+        random_hash = random.randbytes(25)  # 25-byte address
+        caller_id = Address(random_hash)
+    
+    # Handle vertex_data - use provided vertex or create minimal one
+    if vertex:
+        vertex_data = VertexData.create_from_vertex(vertex)
+    else:
+        # Create minimal vertex for VertexData.create_from_vertex()
+        from hathor.transaction import Transaction
+        
+        # Create a minimal transaction as vertex
+        minimal_vertex = Transaction(
+            hash=b'\\x00' * 32,
+            timestamp=timestamp or int(__import__('time').time()),
+            version=1,
+            weight=1.0,
+            inputs=[],
+            outputs=[],
+            parents=[]
+        )
+        vertex_data = VertexData.create_from_vertex(minimal_vertex)
+    
+    # Create block_data following the unittest pattern
+    block_data = BlockData(
+        hash=VertexId(b'\\x00' * 32),  # Empty hash like in unittest
+        timestamp=timestamp or int(__import__('time').time()),
+        height=0
+    )
     
     return Context(
-        actions=[],  # Empty actions for basic method calls
         caller_id=caller_id,
-        timestamp=int(__import__('time').time())
+        vertex_data=vertex_data,
+        block_data=block_data,
+        actions=Context.__group_actions__(actions or ()),  # Group provided or empty actions
     )
 
 print("✅ Real Hathor SDK environment loaded successfully")
@@ -579,7 +618,7 @@ try:
         contract_instance = instance_data['instance']
     
     # Create context
-    context = _create_context('${caller_address}')
+    context = _create_context(caller_address_hex='${caller_address}')
     
     # Get the method
     if not hasattr(contract_instance, '${method_name}'):
