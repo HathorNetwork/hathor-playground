@@ -8,7 +8,7 @@ async function ensureGit() {
   if (!git) {
     git = await import('isomorphic-git');
     http = (await import('isomorphic-git/http/web')).default;
-    LightningFS = (await import('lightning-fs')).default;
+    LightningFS = (await import('@isomorphic-git/lightning-fs')).default;
   }
 }
 

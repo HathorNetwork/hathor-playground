@@ -1,0 +1,44 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic:
+    - alertdialog
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - img "Lettering Pharaohs Quest" [ref=e8]
+          - img "Lettering Nanos" [ref=e9]
+        - generic [ref=e10]:
+          - paragraph [ref=e11]: Step into the realm of Hathor, where the sands of fortune await your command. Here, you have the power to craft your own betting contracts and join the legendary wagers of the ancients.
+          - paragraph [ref=e12]:
+            - text: Embark on the Pharaoh's Quest and Play to Qualify for
+            - generic [ref=e13]: HTR Airdrops!
+          - button "Start now!" [ref=e14] [cursor=pointer]:
+            - link "Start now!" [ref=e15] [cursor=pointer]:
+              - /url: /create
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - img "Hathor" [ref=e19]
+          - generic [ref=e21]:
+            - generic [ref=e22]:
+              - img "Character" [ref=e25]
+              - img "Character" [ref=e30]
+              - img "Character" [ref=e35]
+              - img "Character" [ref=e40]
+            - img "Character" [ref=e45]
+        - generic [ref=e49]:
+          - img "God Icon" [ref=e51]
+          - img "Pharao Icon" [ref=e53]
+          - img "Priest Icon" [ref=e55]
+          - img "Noble Icon" [ref=e57]
+          - img "Artisan Icon" [ref=e59]
+          - img "Scribe Icon" [ref=e61]
+          - img "Builder Icon" [ref=e63]
+          - img "Servent Icon" [ref=e65]
+    - generic [ref=e66]: v0.4.0
+  - region "Notifications (F8)":
+    - list
+```
