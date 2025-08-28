@@ -11,12 +11,14 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@isomorphic-git/lightning-fs": "^4.6.2",
     "@monaco-editor/react": "^4.6.0",
     "@tanstack/react-query": "^5.0.0",
     "@types/diff": "^7.0.2",
     "axios": "^1.6.0",
     "clsx": "^2.0.0",
     "diff": "^8.0.2",
+    "isomorphic-git": "^1.33.1",
     "jquery": "^3.7.1",
     "lucide-react": "^0.292.0",
     "monaco-editor": "^0.44.0",

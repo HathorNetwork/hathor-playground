@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import { Contract } from '@/lib/api';
 import { storage, initStorage, StoredFile, ChatSession, ChatMessage } from '@/lib/storage';
+import { GitClient } from '@/lib/git';
 
 export interface File {
   id: string;
@@ -46,6 +47,7 @@ interface IDEState {
   isCompiling: boolean;
   isExecuting: boolean;
   isStorageInitialized: boolean;
+  gitRepos: Record<string, GitClient>;
 
   // Actions
   addFile: (file: File) => void;
@@ -77,6 +79,18 @@ interface IDEState {
   saveFileToStorage: (file: File) => Promise<void>;
   deleteFileFromStorage: (id: string) => Promise<void>;
   loadChatSessionsFromStorage: () => Promise<void>;
+
+  // Git operations
+  initGit: () => Promise<void>;
+  commitChanges: (message: string) => Promise<void>;
+  setGitRemote: (url: string) => Promise<void>;
+  pushToRemote: (username?: string, password?: string) => Promise<void>;
+
+  getCommitHistory: () => Promise<any[]>;
+  checkoutVersion: (ref: string) => Promise<void>;
+  listBranches: () => Promise<string[]>;
+  createBranch: (name: string) => Promise<void>;
+  switchBranch: (name: string) => Promise<void>;
 }
 
 const createIDEStore: StateCreator<IDEState> = (set, get) => ({
@@ -243,6 +257,7 @@ __blueprint__ = LiquidityPool`,
   isCompiling: false,
   isExecuting: false,
   isStorageInitialized: false,
+  gitRepos: {},
 
   // Actions
   addFile: (file) => {
@@ -437,6 +452,7 @@ __blueprint__ = LiquidityPool`,
       const state = get();
       await state.loadFilesFromStorage();
       await state.loadChatSessionsFromStorage();
+      await state.initGit();
 
       console.log('IDE store initialized with persistent storage');
     } catch (error) {
@@ -534,6 +550,155 @@ __blueprint__ = LiquidityPool`,
       }
     } catch (error) {
       console.error('Failed to load chat sessions from storage:', error);
+    }
+  },
+
+  // Git operations
+  initGit: async () => {
+    set({ gitRepos: {} });
+  },
+
+  commitChanges: async (message: string) => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return;
+
+    let git = state.gitRepos[file.id];
+    if (!git) {
+      git = new GitClient(`repo-${file.id}`);
+      await git.init();
+      set({ gitRepos: { ...state.gitRepos, [file.id]: git } });
+    }
+
+    try {
+      await git.commitFile(file, message);
+    } catch (error) {
+      console.error('Git commit failed:', error);
+    }
+  },
+
+  setGitRemote: async (url: string) => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return;
+
+    let git = state.gitRepos[file.id];
+    if (!git) {
+      git = new GitClient(`repo-${file.id}`);
+      await git.init();
+      set({ gitRepos: { ...state.gitRepos, [file.id]: git } });
+    }
+
+    try {
+      await git.setRemote(url);
+    } catch (error) {
+      console.error('Setting git remote failed:', error);
+    }
+  },
+
+  pushToRemote: async (username?: string, password?: string) => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return;
+
+    const git = state.gitRepos[file.id];
+    if (!git) return;
+
+    try {
+      await git.push('origin', 'main', username, password);
+    } catch (error) {
+      console.error('Git push failed:', error);
+    }
+  },
+
+  getCommitHistory: async () => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return [];
+
+    const git = state.gitRepos[file.id];
+    if (!git) return [];
+
+    try {
+      return (await git.log()) || [];
+    } catch (error) {
+      console.error('Git log failed:', error);
+      return [];
+    }
+  },
+
+  checkoutVersion: async (ref: string) => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return;
+
+    const git = state.gitRepos[file.id];
+    if (!git) return;
+
+    try {
+      const content = await git.checkout(ref, file.name);
+      if (content !== null) {
+        set({
+          files: state.files.map(f => (f.id === file.id ? { ...f, content } : f)),
+        });
+      }
+    } catch (error) {
+      console.error('Git checkout failed:', error);
+    }
+  },
+
+  listBranches: async () => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return [];
+
+    const git = state.gitRepos[file.id];
+    if (!git) return [];
+
+    try {
+      return (await git.listBranches()) || [];
+    } catch (error) {
+      console.error('Listing branches failed:', error);
+      return [];
+    }
+  },
+
+  createBranch: async (name: string) => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return;
+
+    let git = state.gitRepos[file.id];
+    if (!git) {
+      git = new GitClient(`repo-${file.id}`);
+      await git.init();
+      set({ gitRepos: { ...state.gitRepos, [file.id]: git } });
+    }
+
+    try {
+      await git.createBranch(name);
+    } catch (error) {
+      console.error('Creating branch failed:', error);
+    }
+  },
+
+  switchBranch: async (name: string) => {
+    const state = get();
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (!file) return;
+
+    const git = state.gitRepos[file.id];
+    if (!git) return;
+
+    try {
+      const content = await git.switchBranch(name, file.name);
+      if (content !== null) {
+        set({
+          files: state.files.map(f => (f.id === file.id ? { ...f, content } : f)),
+        });
+      }
+    } catch (error) {
+      console.error('Switching branch failed:', error);
     }
   },
 });

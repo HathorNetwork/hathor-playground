@@ -30,6 +30,14 @@ export function IDE() {
     addCompiledContract,
     clearContractInstances,
     initializeStore,
+    commitChanges,
+    setGitRemote,
+    pushToRemote,
+    getCommitHistory,
+    checkoutVersion,
+    listBranches,
+    createBranch,
+    switchBranch,
   } = useIDEStore();
 
   // Initialize storage on component mount
@@ -174,11 +182,101 @@ export function IDE() {
     }
   };
 
+  const handleCommit = async () => {
+    const message = prompt('Commit message:');
+    if (!message) return;
+    try {
+      await commitChanges(message);
+      addConsoleMessage('success', 'Changes committed');
+    } catch (e: any) {
+      addConsoleMessage('error', `Commit failed: ${e?.message || e}`);
+    }
+  };
+
+  const handlePush = async () => {
+    try {
+      const remote = prompt('Remote URL (leave blank to use existing):');
+      if (remote) {
+        await setGitRemote(remote);
+      }
+      const username = prompt('Remote username (optional):') || undefined;
+      const password = prompt('Remote password/token (optional):') || undefined;
+      await pushToRemote(username, password);
+      addConsoleMessage('success', 'Pushed to remote');
+    } catch (e: any) {
+      addConsoleMessage('error', `Push failed: ${e?.message || e}`);
+    }
+  };
+
+  const handleHistory = async () => {
+    try {
+      const commits = await getCommitHistory();
+      if (commits.length === 0) {
+        addConsoleMessage('info', 'No commits found');
+      }
+      commits.forEach(c => addConsoleMessage('info', `${c.oid}: ${c.commit.message}`));
+    } catch (e: any) {
+      addConsoleMessage('error', `History failed: ${e?.message || e}`);
+    }
+  };
+
+  const handleCheckout = async () => {
+    const ref = prompt('Commit hash or branch to checkout:');
+    if (!ref) return;
+    try {
+      await checkoutVersion(ref);
+      addConsoleMessage('success', `Checked out ${ref}`);
+    } catch (e: any) {
+      addConsoleMessage('error', `Checkout failed: ${e?.message || e}`);
+    }
+  };
+
+  const handleListBranches = async () => {
+    try {
+      const branches = await listBranches();
+      if (branches.length === 0) {
+        addConsoleMessage('info', 'No branches found');
+      }
+      branches.forEach(b => addConsoleMessage('info', `Branch: ${b}`));
+    } catch (e: any) {
+      addConsoleMessage('error', `List branches failed: ${e?.message || e}`);
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    const name = prompt('New branch name:');
+    if (!name) return;
+    try {
+      await createBranch(name);
+      addConsoleMessage('success', `Branch ${name} created`);
+    } catch (e: any) {
+      addConsoleMessage('error', `Create branch failed: ${e?.message || e}`);
+    }
+  };
+
+  const handleSwitchBranch = async () => {
+    const name = prompt('Branch to switch to:');
+    if (!name) return;
+    try {
+      await switchBranch(name);
+      addConsoleMessage('success', `Switched to branch ${name}`);
+    } catch (e: any) {
+      addConsoleMessage('error', `Switch branch failed: ${e?.message || e}`);
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-900">
       <Toolbar
         onCompile={handleCompile}
         onExecute={handleExecute}
+        onCommit={handleCommit}
+        onPush={handlePush}
+        onHistory={handleHistory}
+        onCheckout={handleCheckout}
+        onListBranches={handleListBranches}
+        onCreateBranch={handleCreateBranch}
+        onSwitchBranch={handleSwitchBranch}
         isCompiling={isCompiling}
         isExecuting={isExecuting}
         fileName={activeFile?.name}

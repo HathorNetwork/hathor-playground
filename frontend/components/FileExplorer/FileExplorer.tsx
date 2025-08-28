@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { FileText, Plus, Trash2, FolderOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import { useIDEStore, File } from '@/store/ide-store';
+import { GitPanel } from '@/components/Git/GitPanel';
 import { clsx } from 'clsx';
 
 export const FileExplorer: React.FC = () => {
@@ -50,78 +51,86 @@ __blueprint__ = ${newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '')}`,
   };
 
   return (
-    <div className="h-full bg-gray-900 text-gray-100 p-4">
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-2 hover:text-blue-400 transition-colors"
-          >
-            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            <FolderOpen size={16} />
-            <span className="text-sm font-medium">Contracts</span>
-          </button>
-          <button
-            onClick={() => setShowNewFileInput(true)}
-            className="p-1 hover:bg-gray-800 rounded transition-colors"
-            title="New File"
-          >
-            <Plus size={16} />
-          </button>
+    <div className="h-full bg-gray-900 text-gray-100 flex flex-col">
+      {/* Files Section */}
+      <div className="flex-1 p-4 min-h-0">
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="flex items-center gap-2 hover:text-blue-400 transition-colors"
+            >
+              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              <FolderOpen size={16} />
+              <span className="text-sm font-medium">Contracts</span>
+            </button>
+            <button
+              onClick={() => setShowNewFileInput(true)}
+              className="p-1 hover:bg-gray-800 rounded transition-colors"
+              title="New File"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+
+          {showNewFileInput && (
+            <div className="mb-2">
+              <input
+                type="text"
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleNewFile();
+                  if (e.key === 'Escape') {
+                    setShowNewFileInput(false);
+                    setNewFileName('');
+                  }
+                }}
+                onBlur={handleNewFile}
+                placeholder="filename.py"
+                className="w-full px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded focus:outline-none focus:border-blue-500"
+                autoFocus
+              />
+            </div>
+          )}
         </div>
 
-        {showNewFileInput && (
-          <div className="mb-2">
-            <input
-              type="text"
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleNewFile();
-                if (e.key === 'Escape') {
-                  setShowNewFileInput(false);
-                  setNewFileName('');
-                }
-              }}
-              onBlur={handleNewFile}
-              placeholder="filename.py"
-              className="w-full px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded focus:outline-none focus:border-blue-500"
-              autoFocus
-            />
+        {isExpanded && (
+          <div className="space-y-1 overflow-y-auto">
+            {files.map((file: File) => (
+              <div
+                key={file.id}
+                onClick={() => setActiveFile(file.id)}
+                className={clsx(
+                  'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
+                  activeFileId === file.id
+                    ? 'bg-blue-600 text-white'
+                    : 'hover:bg-gray-800'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <FileText size={14} />
+                  <span className="text-sm">{file.name}</span>
+                </div>
+                {files.length > 1 && (
+                  <button
+                    onClick={(e) => handleDeleteFile(e, file.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all"
+                    title="Delete File"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {isExpanded && (
-        <div className="space-y-1">
-          {files.map((file: File) => (
-            <div
-              key={file.id}
-              onClick={() => setActiveFile(file.id)}
-              className={clsx(
-                'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
-                activeFileId === file.id
-                  ? 'bg-blue-600 text-white'
-                  : 'hover:bg-gray-800'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <FileText size={14} />
-                <span className="text-sm">{file.name}</span>
-              </div>
-              {files.length > 1 && (
-                <button
-                  onClick={(e) => handleDeleteFile(e, file.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all"
-                  title="Delete File"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Git Section */}
+      <div className="flex-1 min-h-0">
+        <GitPanel />
+      </div>
     </div>
   );
 };
