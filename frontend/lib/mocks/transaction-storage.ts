@@ -47,12 +47,44 @@ class MockTransactionStorage(BaseTransactionStorage):
     
     def __init__(self, blueprints: Optional[Dict[bytes, Any]] = None):
         self._blueprints = blueprints or {}
+        self._transactions = {}  # Store OnChainBlueprint transactions
+    
+    def get_transaction(self, tx_id):
+        """Get transaction by ID - returns OnChainBlueprint instance if exists."""
+        if isinstance(tx_id, str):
+            tx_id = bytes.fromhex(tx_id)
+        elif isinstance(tx_id, bytes):
+            pass
+        else:
+            # Handle other ID types
+            tx_id = bytes(tx_id)
+            
+        return self._transactions.get(tx_id)
+    
+    def save_transaction(self, tx):
+        """Save transaction - stores OnChainBlueprint transactions."""
+        self._transactions[tx.hash] = tx
+    
+    def create_blueprint_transaction(self, code_string: str, blueprint_id_bytes: bytes, settings):
+        """Create an OnChainBlueprint transaction from code string."""
+        from hathor.nanocontracts.on_chain_blueprint import OnChainBlueprint, Code
+        
+        # Create Code instance from Python code string
+        code = Code.from_python_code(code_string, settings)
+        
+        # Create OnChainBlueprint transaction
+        blueprint_tx = OnChainBlueprint(
+            code=code,
+            hash=blueprint_id_bytes,
+            storage=self
+        )
+        
+        return blueprint_tx
     
     def get_blueprint_class(self, blueprint_id: bytes):
         """Get blueprint class by ID - only method needed by nano contracts runner."""
-        if blueprint_id not in self._blueprints:
-            raise BlueprintNotFoundError(blueprint_id)
-        return self._blueprints[blueprint_id]
+        blueprint = self._transactions[blueprint_id]
+        return blueprint.get_blueprint_class()
     
     def add_blueprint(self, blueprint_id: bytes, blueprint_class):
         """Add a blueprint to the mock storage."""

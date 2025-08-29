@@ -58,6 +58,8 @@ export const HATHOR_MODULES = [
   'hathor/conf/__init__.py',
   'hathor/conf/get_settings.py',
   'hathor/conf/mainnet.py',
+  'hathor/conf/mainnet.yml',
+  'hathor/conf/testnet.yml',
   'hathor/conf/settings.py',
   'hathor/consensus/__init__.py',
   'hathor/consensus/block_consensus.py',

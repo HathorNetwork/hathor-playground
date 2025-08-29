@@ -54,12 +54,19 @@ class PyodideRunner {
       }
 
       this.pyodide = await window.loadPyodide!({
-        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.28.2/full/",
+        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/",
       });
 
       // Load real Hathor modules from GitHub - NO FALLBACKS
       await this.setupHathorModules();
 
+      // Check Python version
+      const pythonVersion = this.pyodide.runPython(`
+import sys
+sys.version
+      `);
+      console.log('🐍 Python version:', pythonVersion);
+      
       this.isInitialized = true;
       console.log('✅ Pyodide initialized successfully');
     } catch (error) {
@@ -71,7 +78,7 @@ class PyodideRunner {
   private async loadPyodideScript(): Promise<void> {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/pyodide/v0.28.2/full/pyodide.js';
+      script.src = 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js';
       script.onload = () => resolve();
       script.onerror = () => reject(new Error('Failed to load Pyodide script'));
       document.head.appendChild(script);
@@ -91,6 +98,7 @@ class PyodideRunner {
     
     // Essential packages that Hathor modules depend on
     // Note: Some packages like twisted, cryptography, rocksdb won't work in browser
+    // TODO check which packages we really need to import
     const packages = [
       'structlog',
       'typing_extensions', 
@@ -99,9 +107,9 @@ class PyodideRunner {
       'intervaltree',
       'sortedcontainers',
       'base58',
-      'pycoin',
+      //'pycoin',
       'mnemonic',
-      'pysha3',  // For keccak
+      //'pysha3',  // For keccak
       'requests',
       'aiohttp',
       'multidict',
@@ -128,17 +136,17 @@ class PyodideRunner {
     
     console.log(`📊 Dependencies: ${installedCount} installed, ${failedCount} failed`);
     
-    // Load Hathor modules from GitHub using hardcoded list
-    await this.loadHathorFromGitHub();
+    // Load Hathor modules from local server
+    await this.loadHathorFromLocal();
     
     console.log('✅ Real Hathor SDK loaded successfully');
   }
 
-  private async loadHathorFromGitHub(): Promise<void> {
-    console.log(`📦 Loading ${HATHOR_MODULES.length} Hathor modules...`);
+  private async loadHathorFromLocal(): Promise<void> {
+    console.log(`📦 Loading ${HATHOR_MODULES.length} Hathor modules from local server...`);
     
-    // Base GitHub URL for Hathor core repository
-    const githubBaseUrl = 'https://raw.githubusercontent.com/HathorNetwork/hathor-core/master';
+    // Base URL for locally served Hathor modules
+    const localBaseUrl = '/hathor-modules';
 
     let loaded = 0;
     let failed = 0;
@@ -156,7 +164,9 @@ class PyodideRunner {
       const batch = batches[batchIndex];
       const batchPromises = batch.map(async (filePath) => {
         try {
-          const response = await fetch(`${githubBaseUrl}/${filePath}`);
+          // Remove 'hathor/' prefix since files are stored at root level
+          const adjustedPath = filePath.replace('hathor/', '');
+          const response = await fetch(`${localBaseUrl}/${adjustedPath}`);
           if (!response.ok) {
             throw new Error(`Failed to fetch ${filePath}: ${response.status}`);
           }
@@ -177,7 +187,6 @@ class PyodideRunner {
             'hathor/websocket/factory.py', // Uses twisted
             'hathor/stratum/stratum.py', // Uses twisted
             'hathor/nanocontracts/rng.py', // Uses cryptography
-            'hathor/nanocontracts/on_chain_blueprint.py', // Uses cryptography  
             'hathor/nanocontracts/utils.py', // Uses cryptography and pycoin - create proper stub
           ];
           
@@ -227,6 +236,12 @@ os.makedirs('${dirPath}', exist_ok=True)
     } else if (errors.length > 10) {
       console.warn(`Failed to load ${errors.length} modules. First 10:`, errors.slice(0, 10));
     }
+
+    // TODO load cryptography manually
+    await this.pyodide.loadPackage("cryptography");
+
+    // Set up all mock modules for browser compatibility FIRST
+    await this.pyodide.runPython(MockLoader.getAllSetupMocks());
 
     // Set up Python environment with real Hathor modules
     await this.pyodide.runPython(`
@@ -326,15 +341,69 @@ except ImportError as e:
 except Exception as e:
     print(f"❌ Unexpected error in nanocontracts setup: {e}")
 
-# Set up global contract registry for execution
+# Import the real Runner
+try:
+    from hathor.nanocontracts.runner.runner import Runner
+    from hathor.nanocontracts.storage.backends import MemoryNodeTrieStore
+    from hathor.nanocontracts.storage.contract_storage import NCContractStorage
+    from hathor.nanocontracts.storage.factory import NCStorageFactory
+    print("✓ Runner imported successfully")
+    
+    # Create global runner instance with memory storage
+    try:
+        # Create memory-based storage backend with proper parameters
+        node_store = MemoryNodeTrieStore()
+
+        from hathor.conf import HathorSettings
+        from hathor.reactor.reactor import MockReactorProtocol, get_global_reactor
+        # MockTransactionStorage is available from the transaction_storage mock
+        from hathor.transaction.storage.transaction_storage import MockTransactionStorage
+        from hathor.nanocontracts.storage.block_storage import NCBlockStorage
+        from hathor.nanocontracts.storage.patricia_trie import PatriciaTrie
+        from hathor.nanocontracts.types import VertexId
+        from hathor.nanocontracts.storage.token_proxy import TokenProxy
+        
+        # Create mock/minimal implementations
+        settings = HathorSettings()  # Default settings
+        reactor = get_global_reactor()  # Use the mock reactor
+        tx_storage = MockTransactionStorage()  
+        trie = PatriciaTrie(node_store)
+        block_storage = NCBlockStorage(trie)
+        # TODO ok to use dummy seed or should we use proper one?
+        seed = bytes(32)  # Dummy seed
+
+        dummy_nc_id = VertexId(bytes(32))
+        dummy_token_proxy = TokenProxy(block_storage=block_storage)
+        
+        nc_storage = NCContractStorage(trie=trie, nc_id=dummy_nc_id, token_proxy=dummy_token_proxy)
+        
+        storage_factory = NCStorageFactory()
+        nc_runner = Runner(
+            reactor=reactor,
+            settings=settings,
+            tx_storage=tx_storage,
+            storage_factory=storage_factory,
+            block_storage=block_storage,
+            seed=seed
+        )
+        print("✓ Runner instance created with NCContractStorage")
+    except Exception as e:
+        print(f"⚠️ Failed to create Runner instance: {e}")
+        nc_runner = None
+    
+except ImportError as e:
+    print(f"❌ Failed to import Runner: {e}")
+    # Fallback to manual implementation if needed
+    nc_runner = None
+
+# Set up global contract registry for execution (keeping as fallback)
 _contract_registry = {}
 _contract_instances = {}
 
 def _create_contract_id():
     """Generate a contract ID"""
     import random
-    import string
-    return ''.join(random.choices(string.hexdigits.lower(), k=64))
+    return random.randbytes(32)
 
 def _create_address_from_hex(hex_str):
     """Convert hex string to 25-byte address"""
@@ -403,8 +472,7 @@ def _create_context(
 print("✅ Real Hathor SDK environment loaded successfully")
 `);
 
-    // Set up all mock modules for browser compatibility  
-    await this.pyodide.runPython(MockLoader.getAllSetupMocks());
+    // Mock modules already set up at the beginning
 
   }
 
@@ -476,6 +544,28 @@ try:
     # Store the blueprint class
     _contract_registry['${blueprint_id}'] = blueprint_class
     
+    # Create and save OnChainBlueprint transaction if we have a transaction storage
+    try:
+        from hathor.conf import HathorSettings
+        settings = HathorSettings()
+        
+        # Convert blueprint_id string to bytes
+        blueprint_id_bytes = bytes.fromhex('${blueprint_id}')
+        
+        # Create OnChainBlueprint transaction with the compiled code
+        blueprint_tx = tx_storage.create_blueprint_transaction(
+            code_string='''${code.replace(/(?:\r\n|\r|\n)/g, "\n")}''',
+            blueprint_id_bytes=blueprint_id_bytes,
+            settings=settings
+        )
+        
+        # Save the transaction
+        tx_storage.save_transaction(blueprint_tx)
+        print(f"✓ Created and saved OnChainBlueprint transaction for {blueprint_id_bytes.hex()}")
+            
+    except Exception as e:
+        print(f"⚠️ Failed to create OnChainBlueprint transaction: {e}")
+    
     result = {
         'success': True,
         'blueprint_id': '${blueprint_id}',
@@ -524,6 +614,7 @@ json.dumps(result)
 
     try {
       const { contract_id, method_name, args, caller_address } = request;
+      console.log('*****', contract_id);
       
       // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)
       let blueprint_id = contract_id;
@@ -541,131 +632,76 @@ json.dumps(result)
         blueprint_id = stored_instance.blueprint_id;
       }
 
-      // Execute the method
+      // Execute the method using real Runner
       const result = this.pyodide.runPython(`
 try:
-    # Get the blueprint class
-    blueprint_class = _contract_registry.get('${blueprint_id}')
-    if blueprint_class is None:
-        raise Exception("Blueprint not found: ${blueprint_id}")
-    
-    # Get or create contract instance
-    if '${method_name}' == 'initialize':
-        # Create new instance with proper environment
-        try:
-            from hathor.nanocontracts.blueprint_env import BlueprintEnvironment
-            
-            # Create mock objects for BlueprintEnvironment
-            class MockRunner:
-                pass
-            
-            class MockNCLogger:
-                def info(self, *args, **kwargs): pass
-                def error(self, *args, **kwargs): pass
-                def warning(self, *args, **kwargs): pass
-                def debug(self, *args, **kwargs): pass
-            
-            class MockNCContractStorage:
-                def __init__(self):
-                    self._storage = {}
-                
-                def put_obj(self, key, nc_type, obj):
-                    """Store an object by key with NCType serialization"""
-                    self._storage[key] = obj
-                    
-                def get_obj(self, key, nc_type, *, default=None):
-                    """Get an object by key with NCType deserialization"""
-                    return self._storage.get(key, default)
-                    
-                def del_obj(self, key):
-                    """Delete an object by key"""
-                    if key in self._storage:
-                        del self._storage[key]
-                        
-                def has_obj(self, key):
-                    """Check if object exists by key"""
-                    return key in self._storage
-                    
-                def clear(self):
-                    """Clear all storage"""
-                    self._storage.clear()
-            
-            # Create environment with mock dependencies
-            env = BlueprintEnvironment(
-                runner=MockRunner(),
-                nc_logger=MockNCLogger(), 
-                storage=MockNCContractStorage()
-            )
-            contract_instance = blueprint_class(env)
-        except Exception as e:
-            print(f"⚠️ Failed to create real BlueprintEnvironment: {e}")
-            # Fallback: create minimal mock environment
-            class MockBlueprintEnvironment:
-                pass
-            contract_instance = blueprint_class(MockBlueprintEnvironment())
+    # Check if we have the real Runner
+    if nc_runner is not None:
+        # Use the real Runner
+        print("🚀 Using real Runner for execution")
         
-        instance_data = {
-            'instance': contract_instance,
-            'blueprint_id': '${blueprint_id}',
-            'state': {}
-        }
-        _contract_instances['${contract_instance_id}'] = instance_data
-    else:
-        # Get existing instance
-        instance_data = _contract_instances.get('${contract_id}')
-        if instance_data is None:
-            raise Exception("Contract instance not found: ${contract_id}")
-        contract_instance = instance_data['instance']
-    
-    # Create context
-    context = _create_context(caller_address_hex='${caller_address}')
-    
-    # Get the method
-    if not hasattr(contract_instance, '${method_name}'):
-        raise Exception(f"Method '${method_name}' not found")
-    
-    method = getattr(contract_instance, '${method_name}')
-    
-    # Prepare arguments
-    args = ${JSON.stringify(args)}
-    
-    # Check if method has proper decorator attributes using Hathor utilities
-    from hathor.nanocontracts.utils import is_nc_public_method, is_nc_view_method
-    
-    is_public = is_nc_public_method(method)
-    is_view = is_nc_view_method(method)
-    
-    if not is_public and not is_view:
-        raise Exception(f"Method '${method_name}' is not decorated with @public or @view")
-    
-    # Execute method
-    if is_public:
-        # Public method requires context
+        # Get the blueprint class
+        #blueprint_class = _contract_registry.get('${blueprint_id}')
+        #if blueprint_class is None:
+        #    raise Exception("Blueprint not found: ${blueprint_id}")
+        
+        # Create context
+        context = _create_context(caller_address_hex='${caller_address}')
+        
+        # Prepare arguments  
+        args = ${JSON.stringify(args)}
+        
         if '${method_name}' == 'initialize':
-            result_value = method(context, *args) if args else method(context)
+            # Initialize new contract
+            print(f"🏗️ Initializing contract with args: {args}")
+            
+            # Use the real runner to initialize the contract
+            from hathor.nanocontracts.types import Address
+            caller_address = Address(_create_address_from_hex('${caller_address}'))
+            
+            # Generate a contract ID and create contract using the real runner
+            blueprint_id = bytes.fromhex('${contract_id}')
+            print('== blueprint id:', blueprint_id.hex(), blueprint_id)
+            contract_id = _create_contract_id()
+            print('== Contract id:', contract_id.hex())
+            
+            # Create contract using correct Runner signature: (contract_id, blueprint_id, ctx)
+            nc_runner.create_contract(
+                contract_id=contract_id,
+                blueprint_id=blueprint_id,
+                ctx=context
+            )
+            
             execution_result = {
                 'success': True,
-                'result': {'contract_id': '${contract_instance_id}'},
-                'output': 'Contract initialized successfully'
+                'result': {'contract_id': contract_id.hex()},
+                'output': 'Contract initialized successfully using real Runner'
             }
+            
         else:
-            result_value = method(context, *args) if args else method(context)
+            # Execute method on existing contract
+            print(f"⚡ Executing method {method_name} with args: {args}")
+            
+            from hathor.nanocontracts.types import ContractId
+            contract_id_obj = ContractId(contract_id)
+            
+            # Execute the method using the real runner
+            result_value = nc_runner.call_contract_method(
+                contract_id=contract_id_obj,
+                method_name='${method_name}',
+                args=args,
+                context=context
+            )
+            
             execution_result = {
                 'success': True,
                 'result': result_value,
-                'output': 'Method executed successfully'
+                'output': f'Method {method_name} executed successfully using real Runner'
             }
-    elif is_view:
-        # View method doesn't need context
-        result_value = method(*args) if args else method()
-        execution_result = {
-            'success': True,
-            'result': result_value,
-            'output': 'View method executed successfully'
-        }
-    else:
-        raise Exception(f"Method '${method_name}' is not decorated with @public or @view")
     
+    else:
+        raise Exception("no runner found")
+
 except Exception as e:
     import traceback
     traceback_str = traceback.format_exc()
