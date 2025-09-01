@@ -101,9 +101,6 @@ export function IDE() {
         if (result.blueprint_id) {
           addConsoleMessage('info', `Blueprint ID: ${result.blueprint_id}`);
         }
-        if (result.gas_estimate) {
-          addConsoleMessage('info', `Estimated gas: ${result.gas_estimate}`);
-        }
 
         // Add to compiled contracts and set current blueprint
         if (result.blueprint_id) {
@@ -160,9 +157,6 @@ export function IDE() {
           addConsoleMessage('success', '✅ Contract executed successfully');
           if (executeResult.result !== undefined) {
             addConsoleMessage('info', `Result: ${JSON.stringify(executeResult.result)}`);
-          }
-          if (executeResult.gas_used) {
-            addConsoleMessage('info', `Gas used: ${executeResult.gas_used}`);
           }
         } else {
           addConsoleMessage('error', `Execution failed: ${executeResult.error}`);

@@ -48,25 +48,21 @@ class PyodideRunner {
     console.log('🐍 Initializing Pyodide...');
     
     try {
+      const PYODIDE_VERSION = "0.27.7";
+      const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+      
       // Load Pyodide script from CDN
       if (!window.loadPyodide) {
-        await this.loadPyodideScript();
+        await this.loadPyodideScript(PYODIDE_VERSION, PYODIDE_BASE_URL);
       }
-
+      
       this.pyodide = await window.loadPyodide!({
-        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/",
+        indexURL: PYODIDE_BASE_URL,
       });
 
-      // Load real Hathor modules from GitHub - NO FALLBACKS
+      // Load real Hathor modules
       await this.setupHathorModules();
 
-      // Check Python version
-      const pythonVersion = this.pyodide.runPython(`
-import sys
-sys.version
-      `);
-      console.log('🐍 Python version:', pythonVersion);
-      
       this.isInitialized = true;
       console.log('✅ Pyodide initialized successfully');
     } catch (error) {
@@ -75,10 +71,10 @@ sys.version
     }
   }
 
-  private async loadPyodideScript(): Promise<void> {
+  private async loadPyodideScript(version: string, baseUrl: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js';
+      script.src = `${baseUrl}pyodide.js`;
       script.onload = () => resolve();
       script.onerror = () => reject(new Error('Failed to load Pyodide script'));
       document.head.appendChild(script);
@@ -98,24 +94,13 @@ sys.version
     
     // Essential packages that Hathor modules depend on
     // Note: Some packages like twisted, cryptography, rocksdb won't work in browser
-    // TODO check which packages we really need to import
     const packages = [
       'structlog',
       'typing_extensions', 
-      'attrs',
       'pydantic==1.10.14',  // Use v1 for compatibility with Hathor
       'intervaltree',
-      'sortedcontainers',
       'base58',
-      //'pycoin',
-      'mnemonic',
-      //'pysha3',  // For keccak
-      'requests',
-      'aiohttp',
       'multidict',
-      'yarl',  // aiohttp dependency
-      'async-timeout',  // aiohttp dependency
-      'charset-normalizer',  // requests dependency
       'PyYAML',  // For yaml support
     ];
     
@@ -237,9 +222,6 @@ os.makedirs('${dirPath}', exist_ok=True)
       console.warn(`Failed to load ${errors.length} modules. First 10:`, errors.slice(0, 10));
     }
 
-    // TODO load cryptography manually
-    await this.pyodide.loadPackage("cryptography");
-
     // Set up all mock modules for browser compatibility FIRST
     await this.pyodide.runPython(MockLoader.getAllSetupMocks());
 
@@ -343,39 +325,28 @@ except Exception as e:
 
 # Import the real Runner
 try:
+    from hathor.conf import HathorSettings
+    from hathor.reactor.reactor import get_global_reactor
+    from hathor.transaction.storage.transaction_storage import MockTransactionStorage
+    from hathor.nanocontracts.storage.block_storage import NCBlockStorage
+    from hathor.nanocontracts.storage.patricia_trie import PatriciaTrie
     from hathor.nanocontracts.runner.runner import Runner
     from hathor.nanocontracts.storage.backends import MemoryNodeTrieStore
-    from hathor.nanocontracts.storage.contract_storage import NCContractStorage
     from hathor.nanocontracts.storage.factory import NCStorageFactory
     print("✓ Runner imported successfully")
     
     # Create global runner instance with memory storage
     try:
-        # Create memory-based storage backend with proper parameters
-        node_store = MemoryNodeTrieStore()
-
-        from hathor.conf import HathorSettings
-        from hathor.reactor.reactor import MockReactorProtocol, get_global_reactor
-        from hathor.transaction.storage.transaction_storage import MockTransactionStorage
-        from hathor.nanocontracts.storage.block_storage import NCBlockStorage
-        from hathor.nanocontracts.storage.patricia_trie import PatriciaTrie
-        from hathor.nanocontracts.types import VertexId
-        from hathor.nanocontracts.storage.token_proxy import TokenProxy
-        
         # Create mock/minimal implementations
         settings = HathorSettings()  # Default settings
         reactor = get_global_reactor()  # Use the mock reactor
         tx_storage = MockTransactionStorage()  
+        node_store = MemoryNodeTrieStore()
         trie = PatriciaTrie(node_store)
         block_storage = NCBlockStorage(trie)
         # TODO ok to use dummy seed or should we use proper one?
         seed = bytes(32)  # Dummy seed
 
-        dummy_nc_id = VertexId(bytes(32))
-        dummy_token_proxy = TokenProxy(block_storage=block_storage)
-        
-        nc_storage = NCContractStorage(trie=trie, nc_id=dummy_nc_id, token_proxy=dummy_token_proxy)
-        
         storage_factory = NCStorageFactory()
         nc_runner = Runner(
             reactor=reactor,
@@ -385,19 +356,14 @@ try:
             block_storage=block_storage,
             seed=seed
         )
-        print("✓ Runner instance created with NCContractStorage")
+        print("✓ Runner instance created")
     except Exception as e:
         print(f"⚠️ Failed to create Runner instance: {e}")
         nc_runner = None
     
 except ImportError as e:
     print(f"❌ Failed to import Runner: {e}")
-    # Fallback to manual implementation if needed
-    nc_runner = None
-
-# Set up global contract registry for execution (keeping as fallback)
-_contract_registry = {}
-_contract_instances = {}
+    raise e
 
 def _create_contract_id():
     """Generate a contract ID"""
@@ -553,10 +519,7 @@ try:
     if blueprint_class is None:
         raise Exception("No Blueprint class found. Make sure to export your class as __blueprint__")
     
-    # Store the blueprint class
-    _contract_registry['${blueprint_id}'] = blueprint_class
-    
-    # Create and save OnChainBlueprint transaction if we have a transaction storage
+    # Create and save OnChainBlueprint transaction
     try:
         from hathor.conf import HathorSettings
         settings = HathorSettings()
@@ -638,18 +601,16 @@ json.dumps(result)
       }
       // Determine method type by parsing the contract code
       let methodType: 'public' | 'view' | null = null;
-      if (method_name !== 'initialize') {
-        if (!code) {
-          return { success: false, error: 'Contract code is required for method execution' };
-        }
-        
-        methodType = this.getMethodType(code, method_name);
-        if (!methodType) {
-          return { 
-            success: false, 
-            error: `Method '${method_name}' is not decorated with @public or @view` 
-          };
-        }
+      if (!code) {
+        return { success: false, error: 'Contract code is required for method execution' };
+      }
+      
+      methodType = this.getMethodType(code, method_name);
+      if (!methodType) {
+        return { 
+          success: false, 
+          error: `Method '${method_name}' is not decorated with @public or @view` 
+        };
       }
 
       // Execute the method using real Runner

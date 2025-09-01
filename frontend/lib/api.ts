@@ -122,7 +122,6 @@ export const contractsApi = {
         success: result.success,
         result: result.result,
         error: result.error,
-        gas_used: 100, // Mock gas used
         logs: result.output ? [result.output] : [],
         state_changes: {}
       };

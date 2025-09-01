@@ -198,10 +198,6 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
         } else {
           addConsoleMessage('info', 'Method completed (no return value)');
         }
-        
-        if (result.gas_used) {
-          addConsoleMessage('info', `Gas used: ${result.gas_used}`);
-        }
       } else {
         // Show detailed error message
         const errorMessage = result.error || 'Unknown error occurred';
