@@ -153,6 +153,7 @@ export function IDE() {
           method_name: 'initialize',
           args: [],
           kwargs: {},
+          code: activeFile.content,
         });
 
         if (executeResult.success) {

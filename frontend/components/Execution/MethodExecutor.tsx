@@ -170,6 +170,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
         kwargs: {},
         caller_address: callerAddresses[selectedCaller as keyof typeof callerAddresses],
         method_type: currentMethod?.decorator,
+        code: activeFile?.content,
       });
 
       // Debug log to see what we're getting

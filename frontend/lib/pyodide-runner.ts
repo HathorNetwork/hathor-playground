@@ -20,6 +20,7 @@ interface ExecutionRequest {
   args: any[];
   kwargs: Record<string, any>;
   caller_address: string;
+  code?: string; // Contract code to determine method decorators
   method_type?: string;
 }
 
@@ -34,7 +35,6 @@ class PyodideRunner {
   private pyodide: any = null;
   private isInitialized: boolean = false;
   private initPromise: Promise<void> | null = null;
-  private contractStorage: Map<string, any> = new Map();
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
@@ -356,7 +356,6 @@ try:
 
         from hathor.conf import HathorSettings
         from hathor.reactor.reactor import MockReactorProtocol, get_global_reactor
-        # MockTransactionStorage is available from the transaction_storage mock
         from hathor.transaction.storage.transaction_storage import MockTransactionStorage
         from hathor.nanocontracts.storage.block_storage import NCBlockStorage
         from hathor.nanocontracts.storage.patricia_trie import PatriciaTrie
@@ -414,6 +413,19 @@ def _create_address_from_hex(hex_str):
         return bytes.fromhex(hex_str[:50])
     else:
         raise ValueError(f"Invalid address length: {len(hex_str)} chars")
+
+def _convert_frontend_args(args_json, kwargs_json):
+    """Convert JSON strings from frontend to Python objects"""
+    import json
+    
+    # Parse JSON strings
+    args = json.loads(args_json) if args_json else []
+    kwargs = json.loads(kwargs_json) if kwargs_json else {}
+    
+    print(f"Converted args from frontend: {args}")
+    print(f"Converted kwargs from frontend: {kwargs}")
+    
+    return args, kwargs
 
 def _create_context(
     caller_address_hex=None,
@@ -613,23 +625,31 @@ json.dumps(result)
     }
 
     try {
-      const { contract_id, method_name, args, caller_address } = request;
-      console.log('*****', contract_id);
+      const { method_name, args, caller_address, code } = request;
+      let { contract_id } = request;
       
-      // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)
-      let blueprint_id = contract_id;
-      let contract_instance_id = contract_id;
+      // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)  
+      let blueprint_id = contract_id; // For initialize, contract_id is actually blueprint_id
       
       if (method_name === 'initialize') {
         // Create new contract instance
-        contract_instance_id = this.generateId();
-      } else {
-        // Find blueprint for existing contract instance
-        const stored_instance = this.contractStorage.get(contract_id);
-        if (!stored_instance) {
-          return { success: false, error: `Contract instance ${contract_id} not found` };
+        contract_id = this.generateId();
+        // blueprint_id stays as the original contract_id (which was blueprint_id)
+      }
+      // Determine method type by parsing the contract code
+      let methodType: 'public' | 'view' | null = null;
+      if (method_name !== 'initialize') {
+        if (!code) {
+          return { success: false, error: 'Contract code is required for method execution' };
         }
-        blueprint_id = stored_instance.blueprint_id;
+        
+        methodType = this.getMethodType(code, method_name);
+        if (!methodType) {
+          return { 
+            success: false, 
+            error: `Method '${method_name}' is not decorated with @public or @view` 
+          };
+        }
       }
 
       // Execute the method using real Runner
@@ -640,18 +660,18 @@ try:
         # Use the real Runner
         print("🚀 Using real Runner for execution")
         
-        # Get the blueprint class
-        #blueprint_class = _contract_registry.get('${blueprint_id}')
-        #if blueprint_class is None:
-        #    raise Exception("Blueprint not found: ${blueprint_id}")
-        
         # Create context
         context = _create_context(caller_address_hex='${caller_address}')
         
-        # Prepare arguments  
-        args = ${JSON.stringify(args)}
+        # Convert arguments and kwargs from JSON to Python objects
+        args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(request.kwargs)}''')
         
-        if '${method_name}' == 'initialize':
+        method_name = '${method_name}'
+        method_type = '${methodType}'
+        blueprint_id = bytes.fromhex('${blueprint_id}')
+        contract_id = bytes.fromhex('${contract_id}')
+
+        if method_name == 'initialize':
             # Initialize new contract
             print(f"🏗️ Initializing contract with args: {args}")
             
@@ -659,17 +679,12 @@ try:
             from hathor.nanocontracts.types import Address
             caller_address = Address(_create_address_from_hex('${caller_address}'))
             
-            # Generate a contract ID and create contract using the real runner
-            blueprint_id = bytes.fromhex('${contract_id}')
-            print('== blueprint id:', blueprint_id.hex(), blueprint_id)
-            contract_id = _create_contract_id()
-            print('== Contract id:', contract_id.hex())
-            
-            # Create contract using correct Runner signature: (contract_id, blueprint_id, ctx)
             nc_runner.create_contract(
-                contract_id=contract_id,
-                blueprint_id=blueprint_id,
-                ctx=context
+                contract_id,
+                blueprint_id,
+                context,
+                *args,
+                **kwargs
             )
             
             execution_result = {
@@ -680,23 +695,32 @@ try:
             
         else:
             # Execute method on existing contract
-            print(f"⚡ Executing method {method_name} with args: {args}")
+            print(f"⚡ Executing method {method_name} with args {args} kwargs {kwargs}, type ${methodType}")
             
-            from hathor.nanocontracts.types import ContractId
-            contract_id_obj = ContractId(contract_id)
-            
-            # Execute the method using the real runner
-            result_value = nc_runner.call_contract_method(
-                contract_id=contract_id_obj,
-                method_name='${method_name}',
-                args=args,
-                context=context
-            )
+            if method_type == 'public':
+                # Use call_public_method for @public methods
+                result_value = nc_runner.call_public_method(
+                    contract_id,
+                    method_name,
+                    context,
+                    *args,
+                    **kwargs
+                )
+            elif method_type == 'view':
+                # Use call_view_method for @view methods  
+                result_value = nc_runner.call_view_method(
+                    contract_id,
+                    method_name,
+                    *args,
+                    **kwargs
+                )
+            else:
+                raise Exception(f"Invalid method type: {method_type}")
             
             execution_result = {
                 'success': True,
                 'result': result_value,
-                'output': f'Method {method_name} executed successfully using real Runner'
+                'output': f'Method {method_name} executed successfully using real Runner (${methodType})'
             }
     
     else:
@@ -718,16 +742,6 @@ json.dumps(execution_result)
 `);
 
       const executionResult = JSON.parse(result);
-      
-      // Store contract instance in our storage if it's a new initialize
-      if (method_name === 'initialize' && executionResult.success) {
-        this.contractStorage.set(contract_instance_id, {
-          blueprint_id,
-          created_at: new Date().toISOString()
-        });
-        executionResult.contract_id = contract_instance_id;
-      }
-      
       return executionResult;
       
     } catch (error) {
@@ -800,6 +814,34 @@ json.dumps(validation_result)
     return Array.from(crypto.getRandomValues(new Uint8Array(32)))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
+  }
+
+  /**
+   * Check if a method has @public or @view decorator by parsing the code string
+   */
+  private getMethodType(code: string, methodName: string): 'public' | 'view' | null {
+    const lines = code.split('\n');
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Look for @public or @view decorators
+      if (line === '@public' || line === '@view') {
+        // Check the next few lines for the method definition
+        for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+          const nextLine = lines[j].trim();
+          if (nextLine.startsWith(`def ${methodName}(`)) {
+            return line === '@public' ? 'public' : 'view';
+          }
+          // Skip empty lines and other decorators
+          if (nextLine && !nextLine.startsWith('@') && !nextLine.startsWith('def')) {
+            break;
+          }
+        }
+      }
+    }
+    
+    return null;
   }
 
   isReady(): boolean {
