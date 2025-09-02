@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { pyodideRunner } from './pyodide-runner';
+import type { MethodDefinition } from '@/utils/contractParser';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -176,6 +177,19 @@ export const contractsApi = {
       const response = await api.get(`/api/contracts/${contractId}/state`);
       return response.data;
     }
+  },
+};
+
+export const promptApi = {
+  generatePrompt: async (
+    contractName: string,
+    methods: MethodDefinition[]
+  ): Promise<string> => {
+    const response = await api.post('/api/frontend/prompt', {
+      contract_name: contractName,
+      methods,
+    });
+    return response.data.prompt;
   },
 };
 

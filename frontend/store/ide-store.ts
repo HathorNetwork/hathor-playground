@@ -42,6 +42,9 @@ interface IDEState {
   chatSessions: ChatSession[];
   activeChatSessionId: string | null;
 
+  // Frontend prompt
+  frontendPrompt: string;
+
   // UI State
   isCompiling: boolean;
   isExecuting: boolean;
@@ -70,6 +73,8 @@ interface IDEState {
   getChatSession: (id: string) => ChatSession | null;
   setActiveChatSession: (id: string) => void;
   deleteChatSession: (id: string) => void;
+
+  setFrontendPrompt: (prompt: string) => void;
 
   // Storage operations
   initializeStore: () => Promise<void>;
@@ -239,6 +244,7 @@ __blueprint__ = LiquidityPool`,
 
   chatSessions: [],
   activeChatSessionId: null,
+  frontendPrompt: '',
 
   isCompiling: false,
   isExecuting: false,
@@ -427,6 +433,14 @@ __blueprint__ = LiquidityPool`,
     }
   },
 
+  setFrontendPrompt: (prompt) => {
+    set(() => ({ frontendPrompt: prompt }));
+    const state = get();
+    if (state.isStorageInitialized) {
+      storage.setPreference('frontendPrompt', prompt).catch(console.error);
+    }
+  },
+
   // Storage operations
   initializeStore: async () => {
     try {
@@ -437,6 +451,8 @@ __blueprint__ = LiquidityPool`,
       const state = get();
       await state.loadFilesFromStorage();
       await state.loadChatSessionsFromStorage();
+      const savedPrompt = await storage.getPreference('frontendPrompt', '');
+      set({ frontendPrompt: savedPrompt });
 
       console.log('IDE store initialized with persistent storage');
     } catch (error) {

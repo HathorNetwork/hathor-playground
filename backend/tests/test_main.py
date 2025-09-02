@@ -16,9 +16,13 @@ sys.path.append(str(ROOT_DIR))
 api_module = types.ModuleType("api")
 ai_module = types.ModuleType("api.ai_assistant")
 ai_module.router = APIRouter()
+frontend_module = types.ModuleType("api.frontend_prompt")
+frontend_module.router = APIRouter()
 api_module.ai_assistant = ai_module
+api_module.frontend_prompt = frontend_module
 sys.modules.setdefault("api", api_module)
 sys.modules.setdefault("api.ai_assistant", ai_module)
+sys.modules.setdefault("api.frontend_prompt", frontend_module)
 
 from main import app  # noqa: E402
 
