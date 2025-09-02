@@ -186,6 +186,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
         kwargs: {},
         caller_address: callerAddresses[selectedCaller as keyof typeof callerAddresses],
         method_type: currentMethod?.decorator,
+        code: activeFile?.content,
       });
 
       // Debug log to see what we're getting
@@ -212,10 +213,6 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
           addConsoleMessage('info', `Result: ${JSON.stringify(result.result)}`);
         } else {
           addConsoleMessage('info', 'Method completed (no return value)');
-        }
-        
-        if (result.gas_used) {
-          addConsoleMessage('info', `Gas used: ${result.gas_used}`);
         }
       } else {
         // Show detailed error message
