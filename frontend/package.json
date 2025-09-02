@@ -5,10 +5,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
-    "build": "next build",
+    "build": "npm run compress-modules && next build",
     "start": "next start -H 0.0.0.0",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "compress-modules": "node scripts/compress-hathor-modules.js"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

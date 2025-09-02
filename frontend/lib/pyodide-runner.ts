@@ -121,110 +121,158 @@ class PyodideRunner {
     
     console.log(`📊 Dependencies: ${installedCount} installed, ${failedCount} failed`);
     
-    // Load Hathor modules from local server
-    await this.loadHathorFromLocal();
+    // Load Hathor modules from compressed archive
+    await this.loadHathorFromArchive();
     
     console.log('✅ Real Hathor SDK loaded successfully');
   }
 
-  private async loadHathorFromLocal(): Promise<void> {
-    console.log(`📦 Loading ${HATHOR_MODULES.length} Hathor modules from local server...`);
+  private async loadHathorFromArchive(): Promise<void> {
+    console.log('📦 Downloading compressed Hathor modules archive...');
     
-    // Base URL for locally served Hathor modules
-    const localBaseUrl = '/hathor-modules';
+    try {
+      // Download the compressed archive
+      const response = await fetch('/hathor-modules.json.gz');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch compressed modules: ${response.status}`);
+      }
+      
+      // Get the compressed data as ArrayBuffer
+      const compressedData = await response.arrayBuffer();
+      const compressedSize = compressedData.byteLength;
+      console.log(`📦 Downloaded compressed archive: ${(compressedSize / 1024 / 1024).toFixed(2)} MB`);
+      
+      // Use browser-side decompression
+      console.log('📦 Decompressing archive in browser...');
+      
+      if (!('DecompressionStream' in window)) {
+        throw new Error('Browser does not support DecompressionStream API. Please use a modern browser (Chrome 80+, Firefox 116+).');
+      }
+      
+      // Decompress using browser's DecompressionStream
+      const stream = new DecompressionStream('gzip');
+      const writer = stream.writable.getWriter();
+      const reader = stream.readable.getReader();
+      
+      writer.write(new Uint8Array(compressedData));
+      writer.close();
+      
+      const chunks = [];
+      let done = false;
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) chunks.push(value);
+      }
+      
+      // Combine chunks
+      const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      const decompressedData = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        decompressedData.set(chunk, offset);
+        offset += chunk.length;
+      }
+      
+      // Process the decompressed data
+      const decompressedText = new TextDecoder().decode(decompressedData);
+      const moduleData = JSON.parse(decompressedText);
+      const files = moduleData.files;
+      const fileCount = Object.keys(files).length;
+      
+      console.log(`📦 Processing ${fileCount} Hathor modules from browser decompression...`);
+      console.log(`📅 Archive created: ${moduleData.timestamp}`);
+      console.log(`📊 Decompressed ${(decompressedData.length / 1024 / 1024).toFixed(2)} MB`);
+      
+      // Continue with module processing
+      await this.processModulesFromData(files, fileCount);
+      
+    } catch (error) {
+      console.error('❌ Failed to load modules from archive:', error);
+      throw error;
+    }
 
+    // Set up all mock modules for browser compatibility FIRST
+    await this.pyodide.runPython(MockLoader.getAllSetupMocks());
+    
+    // Set up Python environment after all modules are loaded
+    await this.setupPythonEnvironment();
+  }
+
+  private async processModulesFromData(files: Record<string, string>, fileCount: number): Promise<void> {
     let loaded = 0;
     let failed = 0;
     const errors: string[] = [];
-
-    // Process modules in parallel batches for faster loading
-    const BATCH_SIZE = 20;
-    const batches: string[][] = [];
     
-    for (let i = 0; i < HATHOR_MODULES.length; i += BATCH_SIZE) {
-      batches.push(HATHOR_MODULES.slice(i, i + BATCH_SIZE));
-    }
-
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      const batchPromises = batch.map(async (filePath) => {
-        try {
-          // Remove 'hathor/' prefix since files are stored at root level
-          const adjustedPath = filePath.replace('hathor/', '');
-          const response = await fetch(`${localBaseUrl}/${adjustedPath}`);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch ${filePath}: ${response.status}`);
+    // Process all files
+    for (const [filePath, content] of Object.entries(files)) {
+      try {
+        let finalContent = content as string;
+        
+        // Add 'hathor/' prefix for mock loader compatibility
+        const fullPath = `hathor/${filePath}`;
+        
+        // Special handling for problematic modules
+        if (MockLoader.getMockForPath(fullPath)) {
+          finalContent = MockLoader.getMockForPath(fullPath)!;
+        }
+        
+        // Skip modules that are known to cause issues in browser
+        const problematicModules = [
+          'cli/run_node.py', // Uses twisted reactor
+          'p2p/protocol.py', // Uses twisted
+          'reactor/reactor.py', // Uses twisted
+          'websocket/factory.py', // Uses twisted
+          'stratum/stratum.py', // Uses twisted
+          'nanocontracts/rng.py', // Uses cryptography
+          'nanocontracts/utils.py', // Uses cryptography and pycoin
+        ];
+        
+        if (problematicModules.some(mod => filePath.includes(mod))) {
+          if (MockLoader.getMockForPath(fullPath)) {
+            finalContent = MockLoader.getMockForPath(fullPath)!;
+          } else {
+            finalContent = `# Stub module for browser compatibility\npass`;
           }
-          
-          let content = await response.text();
-          
-          // Special handling for problematic modules
-          if (MockLoader.getMockForPath(filePath)) {
-            // Replace subprocess-based version detection with static version
-            content = MockLoader.getMockForPath(filePath)!;
-          }
-          
-          // Skip modules that are known to cause issues in browser
-          const problematicModules = [
-            'hathor/cli/run_node.py', // Uses twisted reactor
-            'hathor/p2p/protocol.py', // Uses twisted
-            'hathor/reactor/reactor.py', // Uses twisted
-            'hathor/websocket/factory.py', // Uses twisted
-            'hathor/stratum/stratum.py', // Uses twisted
-            'hathor/nanocontracts/rng.py', // Uses cryptography
-            'hathor/nanocontracts/utils.py', // Uses cryptography and pycoin - create proper stub
-          ];
-          
-          if (problematicModules.some(mod => filePath.includes(mod))) {
-            // Create stub modules with minimal functionality
-            if (MockLoader.getMockForPath(filePath)) {
-              // Provide the actual utils functions from the real module
-              content = MockLoader.getMockForPath(filePath)!;
-            } else {
-              content = `# Stub module for browser compatibility\npass`;
-            }
-          }
-          
-          // Create the file in Pyodide's filesystem
-          const pythonPath = filePath.replace(/\//g, '/');
-          const dirPath = pythonPath.substring(0, pythonPath.lastIndexOf('/'));
-          
-          // Create directory structure
-          await this.pyodide.runPython(`
+        }
+        
+        // Create the file in Pyodide's filesystem with hathor/ prefix
+        const pythonPath = fullPath.replace(/\//g, '/');
+        const dirPath = pythonPath.substring(0, pythonPath.lastIndexOf('/'));
+        
+        // Create directory structure
+        await this.pyodide.runPython(`
 import os
 os.makedirs('${dirPath}', exist_ok=True)
 `);
-          
-          // Write the file
-          this.pyodide.FS.writeFile(pythonPath, content);
-          loaded++;
-          
-        } catch (error) {
-          failed++;
-          const errorMsg = `Failed to load ${filePath}: ${error}`;
-          errors.push(errorMsg);
-          // Continue loading other files - don't fail fast
+        
+        // Write the file
+        this.pyodide.FS.writeFile(pythonPath, finalContent);
+        loaded++;
+        
+        // Progress update every 50 files
+        if (loaded % 50 === 0) {
+          const progress = Math.round((loaded / fileCount) * 100);
+          console.log(`📊 Progress: ${progress}% - Processed ${loaded}/${fileCount} modules`);
         }
-      });
-      
-      await Promise.all(batchPromises);
-      
-      // Progress update
-      const progress = Math.round(((batchIndex + 1) / batches.length) * 100);
-      console.log(`📊 Progress: ${progress}% - Loaded ${loaded}/${HATHOR_MODULES.length} modules`);
+        
+      } catch (error) {
+        failed++;
+        const errorMsg = `Failed to process ${filePath}: ${error}`;
+        errors.push(errorMsg);
+      }
     }
     
-    console.log(`📦 Module loading complete: ${loaded} succeeded, ${failed} failed`);
+    console.log(`📦 Module processing complete: ${loaded} succeeded, ${failed} failed`);
     
     if (errors.length > 0 && errors.length <= 10) {
       console.warn('Failed modules:', errors);
     } else if (errors.length > 10) {
       console.warn(`Failed to load ${errors.length} modules. First 10:`, errors.slice(0, 10));
     }
+  }
 
-    // Set up all mock modules for browser compatibility FIRST
-    await this.pyodide.runPython(MockLoader.getAllSetupMocks());
-
+  private async setupPythonEnvironment(): Promise<void> {
     // Set up Python environment with real Hathor modules
     await this.pyodide.runPython(`
 import sys
@@ -449,8 +497,6 @@ def _create_context(
 
 print("✅ Real Hathor SDK environment loaded successfully")
 `);
-
-    // Mock modules already set up at the beginning
 
   }
 
