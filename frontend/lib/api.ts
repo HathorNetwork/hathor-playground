@@ -10,8 +10,13 @@ const api = axios.create({
   },
 });
 
+// Enable a lightweight mock implementation for e2e tests when
+// NEXT_PUBLIC_PYODIDE_MOCK is set. This avoids downloading the full
+// Pyodide runtime and large Hathor modules during Playwright runs.
+const IS_PYODIDE_MOCK = process.env.NEXT_PUBLIC_PYODIDE_MOCK === 'true';
+
 // Flag to determine if we should use browser-based execution
-const USE_BROWSER_EXECUTION = true;
+const USE_BROWSER_EXECUTION = !IS_PYODIDE_MOCK;
 
 export interface CompileRequest {
   code: string;
@@ -80,6 +85,16 @@ export interface StorageInfo {
 
 export const contractsApi = {
   compile: async (request: CompileRequest): Promise<CompileResponse> => {
+    if (IS_PYODIDE_MOCK) {
+      return {
+        success: true,
+        blueprint_id: 'mock-blueprint',
+        errors: [],
+        warnings: [],
+        gas_estimate: 0,
+      };
+    }
+
     if (USE_BROWSER_EXECUTION) {
       // Use browser-based Pyodide execution
       await pyodideRunner.initialize();
@@ -104,6 +119,16 @@ export const contractsApi = {
   },
 
   execute: async (request: ExecuteRequest): Promise<ExecuteResponse> => {
+    if (IS_PYODIDE_MOCK) {
+      return {
+        success: true,
+        result: null,
+        gas_used: 0,
+        logs: [],
+        state_changes: {},
+      };
+    }
+
     if (USE_BROWSER_EXECUTION) {
       // Use browser-based Pyodide execution
       await pyodideRunner.initialize();
@@ -181,6 +206,10 @@ export const contractsApi = {
 
 export const validationApi = {
   validate: async (request: ValidationRequest): Promise<ValidationResponse> => {
+    if (IS_PYODIDE_MOCK) {
+      return { valid: true, errors: [], suggestions: [] };
+    }
+
     if (USE_BROWSER_EXECUTION) {
       // Use browser-based validation
       await pyodideRunner.initialize();
