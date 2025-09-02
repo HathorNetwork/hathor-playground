@@ -141,6 +141,10 @@ export const CodeEditor: React.FC = () => {
           wordWrap: 'on',
           lineNumbers: 'on',
           renderWhitespace: 'selection',
+          padding: {
+            top: 8,
+            bottom: 8,
+          },
           bracketPairColorization: {
             enabled: true,
           },

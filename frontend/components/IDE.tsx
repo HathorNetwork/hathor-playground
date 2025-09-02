@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelHandle } from 'react-resizable-panels';
+import { Files } from 'lucide-react';
 import { FileExplorer } from './FileExplorer/FileExplorer';
 import { CodeEditor } from './Editor/CodeEditor';
 import { Console } from './Console/Console';
@@ -16,8 +17,10 @@ export function IDE() {
   const [currentBlueprintId, setCurrentBlueprintId] = React.useState<string | undefined>();
   const [isAICollapsed, setIsAICollapsed] = React.useState(false);
   const [isPyodideReady, setIsPyodideReady] = React.useState(false);
+  const [isFileExplorerCollapsed, setIsFileExplorerCollapsed] = React.useState(false);
   const aiPanelRef = React.useRef<ImperativePanelHandle>(null);
   const codePanelRef = React.useRef<ImperativePanelHandle>(null);
+  const fileExplorerPanelRef = React.useRef<ImperativePanelHandle>(null);
   
   const {
     files,
@@ -169,6 +172,24 @@ export function IDE() {
     }
   };
 
+  const toggleFileExplorer = () => {
+    const newCollapsed = !isFileExplorerCollapsed;
+    setIsFileExplorerCollapsed(newCollapsed);
+    
+    // Use imperative API to resize panels
+    setTimeout(() => {
+      if (fileExplorerPanelRef.current && codePanelRef.current) {
+        if (newCollapsed) {
+          // Collapse file explorer to minimum, expand other panels
+          fileExplorerPanelRef.current.resize(3);
+        } else {
+          // Expand file explorer, adjust other panels
+          fileExplorerPanelRef.current.resize(20);
+        }
+      }
+    }, 10);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-900">
       <Toolbar
@@ -179,61 +200,85 @@ export function IDE() {
         fileName={activeFile?.name}
       />
       
-      <div className="flex-1 overflow-hidden">
-        <PanelGroup direction="horizontal">
-          <Panel defaultSize={20} minSize={15} maxSize={25}>
-            <FileExplorer />
-          </Panel>
-          
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
-          
-          <Panel defaultSize={25} minSize={15} maxSize={30}>
-            <MethodExecutor blueprintId={currentBlueprintId} />
-          </Panel>
-          
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
-          
-          <Panel ref={codePanelRef} defaultSize={35}>
-            <PanelGroup direction="vertical">
-              <Panel defaultSize={70}>
-                <CodeEditor />
-              </Panel>
+      <div className="flex-1 overflow-hidden flex">
+        {/* Left Sidebar with Icons */}
+        <div className="flex">
+          <div className="w-12 bg-gray-800 flex flex-col items-center py-2">
+            <button
+              onClick={toggleFileExplorer}
+              className={`p-2 hover:bg-gray-700 rounded transition-colors relative group ${
+                !isFileExplorerCollapsed ? 'bg-gray-700 text-white' : 'text-gray-400'
+              }`}
+              title="File Explorer"
+            >
+              <Files size={18} />
               
-              <PanelResizeHandle className="h-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
-              
-              <Panel defaultSize={30} minSize={15}>
-                <Console />
-              </Panel>
-            </PanelGroup>
-          </Panel>
+              {/* Tooltip - show when collapsed to identify icons */}
+              <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                File Explorer
+              </div>
+            </button>
+          </div>
           
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
-          
-          <Panel ref={aiPanelRef} defaultSize={20} minSize={3} maxSize={40}>
-            <AIAssistant
-              isCollapsed={isAICollapsed}
-              onToggleCollapse={() => {
-                const newCollapsed = !isAICollapsed;
-                setIsAICollapsed(newCollapsed);
+          {/* File Explorer Panel - only show if not collapsed */}
+          {!isFileExplorerCollapsed && (
+            <div className="w-64 border-r border-gray-800">
+              <FileExplorer />
+            </div>
+          )}
+        </div>
+
+        {/* Main Content Area */}
+        <div className="flex-1">
+          <PanelGroup direction="horizontal">
+            <Panel defaultSize={30} minSize={15} maxSize={35}>
+              <MethodExecutor blueprintId={currentBlueprintId} />
+            </Panel>
+            
+            <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+            
+            <Panel ref={codePanelRef} defaultSize={45}>
+              <PanelGroup direction="vertical">
+                <Panel defaultSize={70}>
+                  <CodeEditor />
+                </Panel>
                 
-                // Use imperative API to resize panels
-                setTimeout(() => {
-                  if (aiPanelRef.current && codePanelRef.current) {
-                    if (newCollapsed) {
-                      // Collapse AI panel to minimum, expand code panel
-                      aiPanelRef.current.resize(3);
-                      codePanelRef.current.resize(52);
-                    } else {
-                      // Expand AI panel, shrink code panel
-                      aiPanelRef.current.resize(20);
-                      codePanelRef.current.resize(35);
+                <PanelResizeHandle className="h-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+                
+                <Panel defaultSize={30} minSize={15}>
+                  <Console />
+                </Panel>
+              </PanelGroup>
+            </Panel>
+            
+            <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+            
+            <Panel ref={aiPanelRef} defaultSize={25} minSize={3} maxSize={40}>
+              <AIAssistant
+                isCollapsed={isAICollapsed}
+                onToggleCollapse={() => {
+                  const newCollapsed = !isAICollapsed;
+                  setIsAICollapsed(newCollapsed);
+                  
+                  // Use imperative API to resize panels
+                  setTimeout(() => {
+                    if (aiPanelRef.current && codePanelRef.current) {
+                      if (newCollapsed) {
+                        // Collapse AI panel to minimum, expand code panel
+                        aiPanelRef.current.resize(3);
+                        codePanelRef.current.resize(67);
+                      } else {
+                        // Expand AI panel, shrink code panel
+                        aiPanelRef.current.resize(25);
+                        codePanelRef.current.resize(45);
+                      }
                     }
-                  }
-                }, 10);
-              }}
-            />
-          </Panel>
-        </PanelGroup>
+                  }, 10);
+                }}
+              />
+            </Panel>
+          </PanelGroup>
+        </div>
       </div>
       
       {/* Pyodide Loader */}
