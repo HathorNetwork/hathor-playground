@@ -105,10 +105,8 @@ export class MockLoader {
       'hathor/websocket/factory.py', // Uses twisted
       'hathor/stratum/stratum.py', // Uses twisted
       'hathor/nanocontracts/rng.py', // Uses cryptography
-      // 'hathor/nanocontracts/on_chain_blueprint.py', // Now loaded as real module since we have cryptography
       'hathor/nanocontracts/utils.py', // Uses cryptography and pycoin - create proper stub
       'hathor/transaction/storage/transaction_storage.py', // Uses threading, RocksDB
-      //'hathor/conf/settings.py', // System-specific settings
     ];
 
     return problematicModules.some(mod => filePath.includes(mod));

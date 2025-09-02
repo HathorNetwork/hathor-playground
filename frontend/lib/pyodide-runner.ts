@@ -187,6 +187,9 @@ class PyodideRunner {
       // Continue with module processing
       await this.processModulesFromData(files, fileCount);
       
+      // Modify configuration files after processing
+      await this.modifyConfigFiles();
+      
     } catch (error) {
       console.error('❌ Failed to load modules from archive:', error);
       throw error;
@@ -269,6 +272,43 @@ os.makedirs('${dirPath}', exist_ok=True)
       console.warn('Failed modules:', errors);
     } else if (errors.length > 10) {
       console.warn(`Failed to load ${errors.length} modules. First 10:`, errors.slice(0, 10));
+    }
+  }
+
+  private async modifyConfigFiles(): Promise<void> {
+    console.log('⚙️  Modifying configuration files...');
+    
+    try {
+      // Modify hathor/conf/mainnet.yml to enable nano contracts
+      const mainnetYmlPath = 'hathor/conf/mainnet.yml';
+      
+      // Read the current mainnet.yml file
+      let currentContent: string;
+      try {
+        currentContent = this.pyodide.FS.readFile(mainnetYmlPath, { encoding: 'utf8' });
+      } catch (error) {
+        console.warn(`⚠️ Could not read ${mainnetYmlPath}:`, error);
+        return;
+      }
+      
+      // Check if ENABLE_NANO_CONTRACTS is already present
+      if (currentContent.includes('ENABLE_NANO_CONTRACTS:')) {
+        // Replace existing value
+        const modifiedContent = currentContent.replace(
+          /ENABLE_NANO_CONTRACTS:\s*\w+/,
+          'ENABLE_NANO_CONTRACTS: enabled'
+        );
+        this.pyodide.FS.writeFile(mainnetYmlPath, modifiedContent);
+        console.log(`✅ Updated existing ENABLE_NANO_CONTRACTS in ${mainnetYmlPath}`);
+      } else {
+        // Add the setting at the end of the file
+        const modifiedContent = currentContent + '\nENABLE_NANO_CONTRACTS: enabled\n';
+        this.pyodide.FS.writeFile(mainnetYmlPath, modifiedContent);
+        console.log(`✅ Added ENABLE_NANO_CONTRACTS: enabled to ${mainnetYmlPath}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to modify configuration files:', error);
     }
   }
 
@@ -412,11 +452,6 @@ try:
 except ImportError as e:
     print(f"❌ Failed to import Runner: {e}")
     raise e
-
-def _create_contract_id():
-    """Generate a contract ID"""
-    import random
-    return random.randbytes(32)
 
 def _create_address_from_hex(hex_str):
     """Convert hex string to 25-byte address"""
@@ -567,9 +602,6 @@ try:
     
     # Create and save OnChainBlueprint transaction
     try:
-        from hathor.conf import HathorSettings
-        settings = HathorSettings()
-        
         # Convert blueprint_id string to bytes
         blueprint_id_bytes = bytes.fromhex('${blueprint_id}')
         
