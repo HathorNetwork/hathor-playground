@@ -11,8 +11,6 @@ import { pycoinSetupMock } from './mocks/pycoin';
 
 import { reactorMock } from './mocks/reactor';
 import { versionMock } from './mocks/version';
-import { settingsMock } from './mocks/settings';
-import { onChainBlueprintMock } from './mocks/on-chain-blueprint';
 import { transactionStorageMock } from './mocks/transaction-storage';
 import { utilsMock } from './mocks/utils';
 import { rngMock } from './mocks/rng';
@@ -22,8 +20,6 @@ export class MockLoader {
   private static mocks: Record<string, string> = {
     version: versionMock,
     reactor: reactorMock,
-    settings: settingsMock,
-    on_chain_blueprint: onChainBlueprintMock,
     transaction_storage: transactionStorageMock,
     utils: utilsMock,
     rng: rngMock,

@@ -546,6 +546,7 @@ print("✅ Real Hathor SDK environment loaded successfully")
       const blueprint_id = this.generateId();
 
       console.log('🔍 Contract code to compile:', code.substring(0, 200) + '...');
+      const parsedCode = code.replace(/(?:\r\n|\r|\n)/g, "\n");
       
       // Compile the contract
       const result = this.pyodide.runPython(`
@@ -584,7 +585,7 @@ try:
     exec_locals = {}
     
     # Execute the contract code - imports and type annotations will work
-    exec('''${code.replace(/'/g, "\\'")}''', exec_globals, exec_locals)
+    exec('''${parsedCode}''', exec_globals, exec_locals)
     
     # Find the blueprint class
     blueprint_class = None
@@ -607,7 +608,7 @@ try:
         
         # Create OnChainBlueprint transaction with the compiled code
         blueprint_tx = tx_storage.create_blueprint_transaction(
-            code_string='''${code.replace(/(?:\r\n|\r|\n)/g, "\n")}''',
+            code_string='''${parsedCode}''',
             blueprint_id_bytes=blueprint_id_bytes,
             settings=settings
         )
