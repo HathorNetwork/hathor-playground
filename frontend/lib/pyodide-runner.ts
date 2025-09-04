@@ -887,6 +887,187 @@ json.dumps(validation_result)
   isReady(): boolean {
     return this.isInitialized;
   }
+
+  /**
+   * Get blueprint information using Hathor's native BlueprintInfoResource
+   * This provides proper method signatures, parameter types, and docstrings
+   */
+  async getBlueprintInfo(blueprintId: string): Promise<{
+    success: boolean;
+    blueprintInfo?: {
+      id: string;
+      name: string;
+      attributes: Record<string, string>;
+      public_methods: Record<string, {
+        args: { name: string; type: string }[];
+        return_type: string;
+        docstring: string | null;
+      }>;
+      view_methods: Record<string, {
+        args: { name: string; type: string }[];
+        return_type: string;
+        docstring: string | null;
+      }>;
+      docstring: string | null;
+    };
+    error?: string;
+  }> {
+    if (!this.pyodide) {
+      await this.initialize();
+      if (!this.pyodide) throw new Error('Failed to initialize Pyodide');
+    }
+
+    try {
+      const result = this.pyodide.runPython(`
+try:
+    # Import BlueprintInfoResource and related modules
+    from hathor.nanocontracts.resources.blueprint import BlueprintInfoResource
+    from hathor.nanocontracts.types import blueprint_id_from_bytes
+    from hathor.nanocontracts.exception import BlueprintDoesNotExist
+    import inspect
+    import builtins
+    import types
+    import typing
+    from hathor.nanocontracts import types as nc_types
+    from hathor.nanocontracts.blueprint import NC_FIELDS_ATTR
+    from hathor.nanocontracts.context import Context
+    from hathor.nanocontracts.utils import is_nc_public_method, is_nc_view_method
+    
+    print(f"🔍 Getting blueprint info for: ${blueprintId}")
+    
+    # Create a BlueprintInfoResource instance with mock manager
+    class MockManager:
+        def __init__(self):
+            self.tx_storage = tx_storage
+    
+    mock_manager = MockManager()
+    blueprint_resource = BlueprintInfoResource(mock_manager)
+    
+    # Convert blueprint ID from hex string to blueprint_id type
+    blueprint_id = blueprint_id_from_bytes(bytes.fromhex('${blueprintId}'))
+    
+    # Get blueprint class from storage
+    try:
+        blueprint_class = tx_storage.get_blueprint_class(blueprint_id)
+        print(f"✓ Found blueprint class: {blueprint_class.__name__}")
+    except BlueprintDoesNotExist:
+        raise Exception(f"Blueprint not found: ${blueprintId}")
+    
+    # Extract attributes/fields
+    attributes = {}
+    fields = getattr(blueprint_class, NC_FIELDS_ATTR, {})
+    for name, _type in fields.items():
+        attributes[name] = blueprint_resource.get_type_name(_type)
+    
+    # Extract methods using the same logic as BlueprintInfoResource
+    public_methods = {}
+    view_methods = {}
+    skip_methods = {'__init__'}
+    
+    for name, method in inspect.getmembers(blueprint_class, predicate=inspect.isfunction):
+        if name in skip_methods:
+            continue
+
+        if not (is_nc_public_method(method) or is_nc_view_method(method)):
+            continue
+
+        method_args = []
+        argspec = inspect.getfullargspec(method)
+        
+        # Process arguments, skipping 'self' and 'ctx: Context'
+        for arg_name in argspec.args[1:]:  # Skip 'self'
+            if arg_name in argspec.annotations:
+                arg_type = argspec.annotations[arg_name]
+                if arg_type is Context:
+                    continue  # Skip Context parameter
+                method_args.append({
+                    'name': arg_name,
+                    'type': blueprint_resource.get_type_name(arg_type)
+                })
+            else:
+                # If no type annotation, treat as string
+                method_args.append({
+                    'name': arg_name,
+                    'type': 'str'
+                })
+
+        return_type = argspec.annotations.get('return', None)
+        method_info = {
+            'args': method_args,
+            'return_type': blueprint_resource.get_type_name(return_type) if return_type else 'null',
+            'docstring': inspect.getdoc(method)
+        }
+
+        if is_nc_public_method(method):
+            public_methods[name] = method_info
+
+        if is_nc_view_method(method):
+            view_methods[name] = method_info
+    
+    blueprint_info = {
+        'id': '${blueprintId}',
+        'name': blueprint_class.__name__,
+        'attributes': attributes,
+        'public_methods': public_methods,
+        'view_methods': view_methods,
+        'docstring': inspect.getdoc(blueprint_class)
+    }
+    
+    result = {
+        'success': True,
+        'blueprintInfo': blueprint_info
+    }
+    
+    print(f"✓ Extracted {len(public_methods)} public methods and {len(view_methods)} view methods")
+    
+    # Debug: Show the initialize method signature
+    if 'initialize' in public_methods:
+        init_method = public_methods['initialize']
+        print(f"📝 Initialize method signature:")
+        print(f"  Args: {[arg['name'] + ':' + arg['type'] for arg in init_method['args']]}")
+        print(f"  Return type: {init_method['return_type']}")
+        print(f"  Docstring: {init_method['docstring']}")
+    else:
+        print("❌ No initialize method found in public_methods")
+    
+except Exception as e:
+    import traceback
+    traceback_str = traceback.format_exc()
+    print(f"❌ Blueprint info extraction failed: {e}")
+    print(f"❌ Full traceback: {traceback_str}")
+    result = {
+        'success': False,
+        'error': str(e),
+        'traceback': traceback_str
+    }
+
+import json
+json.dumps(result)
+`);
+
+      const blueprintResult = JSON.parse(result);
+      
+      if (blueprintResult.success) {
+        console.log(`✅ Got blueprint info for ${blueprintId}:`, blueprintResult.blueprintInfo);
+        return { 
+          success: true, 
+          blueprintInfo: blueprintResult.blueprintInfo 
+        };
+      } else {
+        console.error(`❌ Failed to get blueprint info:`, blueprintResult.error);
+        return { 
+          success: false, 
+          error: blueprintResult.error 
+        };
+      }
+    } catch (error) {
+      console.error('❌ Blueprint info extraction error:', error);
+      return { 
+        success: false, 
+        error: String(error) 
+      };
+    }
+  }
 }
 
 // Singleton instance
