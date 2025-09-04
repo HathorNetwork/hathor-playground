@@ -35,6 +35,10 @@ except ImportError:
         
         def __repr__(self):
             return "MockBase()"
+        
+        def __mro_entries__(self, bases):
+            # Return tuple for method resolution order
+            return (MockBase,)
     
     class Protocol(MockBase):
         pass
@@ -125,8 +129,43 @@ except ImportError:
     sys.modules['twisted.python.log'] = log_mod
     sys.modules['twisted.python.threadable'] = MockTwistedModule()
     
+    # Add twisted.web modules for hathor.api_util and BlueprintInfoResource
+    web_mod = MockTwistedModule()
+    http_mod = MockTwistedModule()
+    
+    # Create a mock Request class for twisted.web.http
+    class MockRequest(MockBase):
+        def setHeader(self, name, value):
+            pass
+        
+        def setResponseCode(self, code):
+            pass
+        
+        def getHeader(self, name):
+            return b''
+        
+        args = {}
+    
+    http_mod.Request = MockRequest
+    
+    sys.modules['twisted.web'] = web_mod
+    sys.modules['twisted.web.http'] = http_mod
+    sys.modules['twisted.web.resource'] = MockTwistedModule()
+    
+    # Add hathorlib module mocks for BlueprintInfoResource
+    hathorlib_mod = MockTwistedModule()
+    hathorlib_base_transaction_mod = MockTwistedModule()
+    hathorlib_base_index_mod = MockTwistedModule() 
+    hathorlib_pubsub_mod = MockTwistedModule()
+    
+    sys.modules['hathorlib'] = hathorlib_mod
+    sys.modules['hathorlib.base_transaction'] = hathorlib_base_transaction_mod
+    sys.modules['hathorlib.base.index'] = hathorlib_base_index_mod
+    sys.modules['hathorlib.pubsub'] = hathorlib_pubsub_mod
+    
     twisted_mod.internet = internet_mod
     twisted_mod.python = python_mod
+    twisted_mod.web = web_mod
     internet_mod.reactor = reactor_mod
     internet_mod.protocol = protocol_mod
     internet_mod.defer = defer_mod
@@ -134,5 +173,7 @@ except ImportError:
     internet_mod.task = MockTwistedModule()
     python_mod.log = log_mod
     python_mod.threadable = MockTwistedModule()
+    web_mod.http = http_mod
+    web_mod.resource = MockTwistedModule()
     
-    print("✓ Created twisted stub module")`;
+    print("✓ Created twisted stub module with web support")`;

@@ -6,9 +6,25 @@ import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
 import { generateFrontendPrompt } from '@/utils/promptGenerator';
+import { pyodideRunner } from '@/lib/pyodide-runner';
 
 interface MethodExecutorProps {
   blueprintId?: string;
+}
+
+interface MethodParameter {
+  name: string;
+  type: string;
+  description?: string;
+  placeholder?: string;
+}
+
+interface MethodDefinition {
+  name: string;
+  description: string;
+  parameters: MethodParameter[];
+  returnType?: string;
+  decorator: 'public' | 'view';
 }
 
 export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) => {
@@ -16,16 +32,82 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
+  const [blueprintInfo, setBlueprintInfo] = useState<any>(null);
+  const [isLoadingMethods, setIsLoadingMethods] = useState(false);
   const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance } = useIDEStore();
 
-  // Get current file content to parse methods
+  // Get current file content 
   const activeFile = files.find((f: File) => f.id === activeFileId);
   
-  // Parse methods from current file
-  const methodDefinitions = useMemo(() => {
-    if (!activeFile?.content) return [];
-    return parseContractMethods(activeFile.content);
-  }, [activeFile?.content]);
+  // Load blueprint info using Hathor's native BlueprintInfoResource
+  useEffect(() => {
+    if (blueprintId && pyodideRunner.isReady()) {
+      // Clear old blueprint info first
+      setBlueprintInfo(null);
+      setIsLoadingMethods(true);
+      pyodideRunner.getBlueprintInfo(blueprintId)
+        .then(result => {
+          if (result.success && result.blueprintInfo) {
+            setBlueprintInfo(result.blueprintInfo);
+            console.log('✅ Loaded blueprint info:', result.blueprintInfo);
+          } else {
+            console.error('❌ Failed to load blueprint info:', result.error);
+            addConsoleMessage('error', `Failed to load contract methods: ${result.error}`);
+          }
+        })
+        .catch(error => {
+          console.error('❌ Error loading blueprint info:', error);
+          addConsoleMessage('error', `Error loading contract methods: ${error}`);
+        })
+        .finally(() => {
+          setIsLoadingMethods(false);
+        });
+    } else if (!blueprintId) {
+      // No blueprint ID, clear the info
+      setBlueprintInfo(null);
+    }
+  }, [blueprintId, addConsoleMessage]);
+
+  // Convert blueprint info to method definitions format
+  const methodDefinitions = useMemo((): MethodDefinition[] => {
+    if (!blueprintInfo) return [];
+    
+    const methods: MethodDefinition[] = [];
+    
+    // Add public methods
+    Object.entries(blueprintInfo.public_methods || {}).forEach(([name, info]: [string, any]) => {
+      methods.push({
+        name,
+        description: info.docstring || `Public method`,
+        parameters: info.args.map((arg: any): MethodParameter => ({
+          name: arg.name,
+          type: mapHathorTypeToUI(arg.type),
+          description: `${arg.name} (${arg.type})`,
+          placeholder: getPlaceholderForType(mapHathorTypeToUI(arg.type), arg.name)
+        })),
+        returnType: info.return_type,
+        decorator: 'public'
+      });
+    });
+    
+    // Add view methods
+    Object.entries(blueprintInfo.view_methods || {}).forEach(([name, info]: [string, any]) => {
+      methods.push({
+        name,
+        description: info.docstring || `View method`,
+        parameters: info.args.map((arg: any): MethodParameter => ({
+          name: arg.name,
+          type: mapHathorTypeToUI(arg.type),
+          description: `${arg.name} (${arg.type})`,
+          placeholder: getPlaceholderForType(mapHathorTypeToUI(arg.type), arg.name)
+        })),
+        returnType: info.return_type,
+        decorator: 'view'
+      });
+    });
+    
+    return methods;
+  }, [blueprintInfo]);
 
   // Get contract instance from store (persisted across address changes)
   const contractInstance = blueprintId ? getContractInstance(blueprintId) : null;
@@ -80,6 +162,64 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
       blueprint_2: '4dc143711cef8ec895911f5fb822c21787fa3f78502f93cc73739d345f882606',
     },
   };
+
+// Helper functions for type mapping
+function mapHathorTypeToUI(hathorType: string): string {
+  const typeMapping: Record<string, string> = {
+    'Address': 'address',
+    'TokenUid': 'tokenuid', 
+    'ContractId': 'contractid',
+    'BlueprintId': 'blueprintid',
+    'VertexId': 'vertexid',
+    'Amount': 'amount',
+    'Timestamp': 'timestamp',
+    'bytes': 'hex',
+    'int': 'int',
+    'str': 'string',
+    'float': 'float',
+    'bool': 'boolean',
+    'null': 'null'
+  };
+  
+  // Handle optional types (e.g., "str?" -> "string")
+  if (hathorType.endsWith('?')) {
+    const baseType = hathorType.slice(0, -1);
+    return typeMapping[baseType] || baseType;
+  }
+  
+  return typeMapping[hathorType] || hathorType;
+}
+
+function getPlaceholderForType(type: string, paramName: string): string {
+  switch (type) {
+    case 'address':
+      return 'Select from dropdown';
+    case 'tokenuid':
+      return 'Enter token UID (64 hex chars)';
+    case 'contractid':
+      return 'Enter contract ID (64 hex chars)';
+    case 'blueprintid':
+      return 'Enter blueprint ID (64 hex chars)';
+    case 'vertexid':
+      return 'Enter vertex ID (64 hex chars)';
+    case 'amount':
+      return 'Enter amount (e.g., 1025 = 10.25 tokens)';
+    case 'timestamp':
+      return 'Enter timestamp (e.g., 1578052800)';
+    case 'hex':
+      return 'Enter hex string (e.g., deadbeef...)';
+    case 'int':
+      return '0';
+    case 'string':
+      return `Enter ${paramName}`;
+    case 'float':
+      return '0.0';
+    case 'boolean':
+      return 'true';
+    default:
+      return `Enter ${paramName}`;
+  }
+}
 
   const handleGeneratePrompt = () => {
     if (!activeFile) {
@@ -253,6 +393,18 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     );
   }
 
+  if (isLoadingMethods) {
+    return (
+      <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
+        <div className="text-gray-400 text-center">
+          <Settings className="mx-auto mb-2 animate-spin" size={20} />
+          <p className="text-sm">Loading contract methods...</p>
+          <p className="text-xs mt-1">Using Hathor's native method introspection</p>
+        </div>
+      </div>
+    );
+  }
+
   if (methodDefinitions.length === 0) {
     return (
       <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
@@ -319,18 +471,28 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
           >
             {methodDefinitions.map((method) => (
               <option key={method.name} value={method.name}>
-                {method.name} - {method.description}
+                [{method.decorator}] {method.name}({method.parameters.length} params) → {method.returnType}
               </option>
             ))}
           </select>
+          {/* Show method description below dropdown */}
+          {methodDefinitions.find(m => m.name === selectedMethod)?.description && (
+            <div className="text-xs text-gray-400 mt-1 p-2 bg-gray-900 rounded">
+              {methodDefinitions.find(m => m.name === selectedMethod)?.description}
+            </div>
+          )}
         </div>
 
         {/* Parameter inputs */}
         {methodDefinitions.find(m => m.name === selectedMethod)?.parameters.map((param) => (
           <div key={param.name}>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              {param.name} ({param.type})
-              <span className="text-gray-400 text-xs ml-1">- {param.description}</span>
+              {param.name} <span className="text-blue-400">({param.type})</span>
+              {param.description && (
+                <span className="text-gray-400 text-xs ml-1 block">
+                  {param.description}
+                </span>
+              )}
             </label>
             {param.type === 'address' ? (
               <select
