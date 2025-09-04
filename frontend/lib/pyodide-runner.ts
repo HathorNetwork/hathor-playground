@@ -464,17 +464,35 @@ def _create_address_from_hex(hex_str):
         raise ValueError(f"Invalid address length: {len(hex_str)} chars")
 
 def _convert_frontend_args(args_json, kwargs_json):
-    """Convert JSON strings from frontend to Python objects"""
+    """Convert JSON strings from frontend to Python objects with proper Hathor type conversion"""
     import json
+    from hathor.nanocontracts.types import TokenUid, ContractId, VertexId, Amount, Timestamp, Address
+    
+    def convert_value(value):
+        """Convert frontend values to proper Hathor types"""
+        if isinstance(value, str):
+            # Check if it's a 64-char hex string (32 bytes)
+            if len(value) == 64 and all(c in '0123456789abcdefABCDEF' for c in value):
+                return bytes.fromhex(value)
+            # Check if it's a 50-char hex string (25 bytes - address)  
+            elif len(value) == 50 and all(c in '0123456789abcdefABCDEF' for c in value):
+                return bytes.fromhex(value)
+        return value
     
     # Parse JSON strings
     args = json.loads(args_json) if args_json else []
     kwargs = json.loads(kwargs_json) if kwargs_json else {}
     
-    print(f"Converted args from frontend: {args}")
-    print(f"Converted kwargs from frontend: {kwargs}")
+    # Convert args
+    converted_args = [convert_value(arg) for arg in args]
     
-    return args, kwargs
+    # Convert kwargs
+    converted_kwargs = {k: convert_value(v) for k, v in kwargs.items()}
+    
+    print(f"Converted args from frontend: {converted_args}")
+    print(f"Converted kwargs from frontend: {converted_kwargs}")
+    
+    return converted_args, converted_kwargs
 
 def _create_context(
     caller_address_hex=None,
