@@ -444,10 +444,21 @@ try:
             block_storage=block_storage,
             seed=seed
         )
-        print("✓ Runner instance created")
+        
+        # Make runner globally available for tests
+        import builtins
+        builtins.nc_runner = nc_runner
+        globals()['nc_runner'] = nc_runner
+        
+        print("✓ Runner instance created and made globally available")
     except Exception as e:
         print(f"⚠️ Failed to create Runner instance: {e}")
         nc_runner = None
+        
+        # Make sure global is also set to None
+        import builtins
+        builtins.nc_runner = None
+        globals()['nc_runner'] = None
     
 except ImportError as e:
     print(f"❌ Failed to import Runner: {e}")
@@ -886,6 +897,191 @@ json.dumps(validation_result)
 
   isReady(): boolean {
     return this.isInitialized;
+  }
+
+  async runTests(testContent: string, testFileName: string = 'test_file.py'): Promise<ExecutionResult> {
+    if (!this.pyodide) {
+      await this.initialize();
+    }
+
+    try {
+      console.log('🧪 Running pytest on test file...');
+      
+      // Install pytest if not already installed
+      const micropip = this.pyodide.pyimport('micropip');
+      await micropip.install('pytest');
+      
+      // Write the test content to a temporary file
+      this.pyodide.FS.writeFile(`/tmp/${testFileName}`, testContent, { encoding: 'utf8' });
+      
+      // Capture output
+      let capturedOutput = '';
+      
+      // Run pytest with verbose output and better test discovery
+      const result = this.pyodide.runPython(`
+import subprocess
+import sys
+import os
+import pytest
+import unittest
+from io import StringIO
+import contextlib
+import importlib
+import types
+
+# Change to tmp directory where the test file is
+os.chdir('/tmp')
+
+# Capture stdout/stderr
+captured_output = StringIO()
+
+result_dict = {}
+
+try:
+    # First, let's try to execute the test file and discover tests manually
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    
+    sys.stdout = captured_output
+    sys.stderr = captured_output
+    
+    # Read and execute the test file content
+    with open('${testFileName}', 'r') as f:
+        test_code = f.read()
+    
+    # Create a module-like namespace for execution
+    test_module = types.ModuleType('test_module')
+    test_module.__file__ = '${testFileName}'
+    test_module.__name__ = '__main__'
+    
+    # Execute the test code in the module namespace
+    exec(test_code, test_module.__dict__)
+    
+    # Find test classes and methods
+    test_classes = []
+    for name, obj in test_module.__dict__.items():
+        if (isinstance(obj, type) and 
+            hasattr(obj, '__bases__') and 
+            any(base.__name__ in ['TestCase', 'BlueprintTestCase'] for base in obj.__bases__)):
+            test_classes.append((name, obj))
+    
+    if test_classes:
+        print(f"Found {len(test_classes)} test class(es)")
+        
+        total_tests = 0
+        passed_tests = 0
+        failed_tests = 0
+        
+        for class_name, test_class in test_classes:
+            # Get test methods (methods starting with 'test_')
+            test_methods = [method for method in dir(test_class) 
+                          if method.startswith('test_') and callable(getattr(test_class, method))]
+            
+            if test_methods:
+                print(f"\\n{class_name}:")
+                
+                # Create instance of test class
+                test_instance = test_class()
+                
+                # Run setUp if it exists
+                if hasattr(test_instance, 'setUp'):
+                    try:
+                        test_instance.setUp()
+                    except Exception as e:
+                        print(f"  setUp failed: {e}")
+                        continue
+                
+                # Run each test method
+                import traceback
+                for method_name in test_methods:
+                    total_tests += 1
+                    try:
+                        method = getattr(test_instance, method_name)
+                        method()
+                        print(f"  {method_name} ... PASSED")
+                        passed_tests += 1
+                    except Exception as e:
+                        print(traceback.format_exc())
+                        print(f"  {method_name} ... FAILED: {e}")
+                        failed_tests += 1
+                
+                # Run tearDown if it exists
+                if hasattr(test_instance, 'tearDown'):
+                    try:
+                        test_instance.tearDown()
+                    except Exception as e:
+                        print(f"  tearDown failed: {e}")
+        
+        # Print summary
+        print(f"\\n{'='*50}")
+        if total_tests > 0:
+            print(f"Ran {total_tests} test(s)")
+            print(f"Passed: {passed_tests}, Failed: {failed_tests}")
+            success = failed_tests == 0
+        else:
+            print("No test methods found")
+            success = False
+            
+        result_dict = {
+            'success': success,
+            'output': captured_output.getvalue(),
+            'exit_code': 0 if success else 1,
+            'tests_run': total_tests,
+            'tests_passed': passed_tests,
+            'tests_failed': failed_tests
+        }
+    else:
+        print("No test classes found")
+        result_dict = {
+            'success': False,
+            'output': captured_output.getvalue() + "\\nNo test classes found",
+            'exit_code': 1
+        }
+    
+    # Restore stdout/stderr
+    sys.stdout = original_stdout  
+    sys.stderr = original_stderr
+    
+except Exception as e:
+    # Restore stdout/stderr in case of exception
+    sys.stdout = original_stdout
+    sys.stderr = original_stderr
+    
+    result_dict = {
+        'success': False,
+        'output': captured_output.getvalue() + f"\\nError: {str(e)}",
+        'error': str(e),
+        'exit_code': -1
+    }
+
+# Return the result dictionary
+result_dict
+`);
+
+      console.log('Raw Python result:', result);
+      
+      const testResult = result ? result.toJs({ dict_converter: Object.fromEntries }) : {};
+      
+      console.log('✅ Test execution completed', testResult);
+      
+      return {
+        success: testResult.success || false,
+        result: testResult.output || '',
+        error: testResult.error || null,
+        output: testResult.output || '',
+        tests_run: testResult.tests_run || 0,
+        tests_passed: testResult.tests_passed || 0,
+        tests_failed: testResult.tests_failed || 0
+      };
+      
+    } catch (error: any) {
+      console.error('❌ Test execution failed:', error);
+      return {
+        success: false,
+        error: error.message || 'Unknown error during test execution',
+        output: `Test execution failed: ${error.message || error}`
+      };
+    }
   }
 }
 

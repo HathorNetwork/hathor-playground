@@ -9,6 +9,7 @@ export interface File {
   content: string;
   language: string;
   path: string;
+  type?: 'contract' | 'test';
 }
 
 export interface ConsoleMessage {
@@ -45,6 +46,7 @@ interface IDEState {
   // UI State
   isCompiling: boolean;
   isExecuting: boolean;
+  isRunningTests: boolean;
   isStorageInitialized: boolean;
 
   // Actions
@@ -63,6 +65,7 @@ interface IDEState {
 
   setIsCompiling: (value: boolean) => void;
   setIsExecuting: (value: boolean) => void;
+  setIsRunningTests: (value: boolean) => void;
 
   // Chat session actions
   createChatSession: () => string;
@@ -121,6 +124,7 @@ class SimpleCounter(Blueprint):
 __blueprint__ = SimpleCounter`,
       language: 'python',
       path: '/contracts/SimpleCounter.py',
+      type: 'contract',
     },
     {
       id: '2',
@@ -228,6 +232,55 @@ class LiquidityPool(Blueprint):
 __blueprint__ = LiquidityPool`,
       language: 'python',
       path: '/contracts/LiquidityPool.py',
+      type: 'contract',
+    },
+    {
+      id: '3',
+      name: 'test_simple_counter.py',
+      content: `from tests.nanocontracts.bl_unittest import BlueprintTestCase
+
+class TestSimpleCounter(BlueprintTestCase):
+    def setUp(self):
+        super().setUp()
+        # Blueprint reference for SimpleCounter
+        self.nc_catalog.blueprints["simple_counter_id"] = SimpleCounter
+        
+    def test_simple_counter_initialization(self):
+        """Test SimpleCounter initialization"""
+        # Create an instance for testing
+        counter = SimpleCounter()
+        context = self.create_context()
+        counter.initialize(context)
+        
+        # Test initial state
+        assert counter.count == 0, "Counter should start at 0"
+
+    def test_simple_counter_increment(self):
+        """Test SimpleCounter increment functionality"""
+        counter = SimpleCounter()
+        context = self.create_context()
+        counter.initialize(context)
+        
+        # Test incrementing
+        counter.increment(context, 5)
+        assert counter.count == 5, "Counter should be 5 after increment"
+        
+        counter.increment(context, 3)
+        assert counter.count == 8, "Counter should be 8 after another increment"
+
+    def test_simple_counter_reset(self):
+        """Test SimpleCounter reset functionality"""
+        counter = SimpleCounter()
+        context = self.create_context()
+        counter.initialize(context)
+        counter.increment(context, 10)
+        
+        # Reset the counter
+        counter.reset(context)
+        assert counter.count == 0, "Counter should be 0 after reset"`,
+      language: 'python',
+      path: '/tests/test_simple_counter.py',
+      type: 'test',
     },
   ],
   activeFileId: '1',
@@ -242,6 +295,7 @@ __blueprint__ = LiquidityPool`,
 
   isCompiling: false,
   isExecuting: false,
+  isRunningTests: false,
   isStorageInitialized: false,
 
   // Actions
@@ -347,6 +401,11 @@ __blueprint__ = LiquidityPool`,
   setIsExecuting: (value) =>
     set(() => ({
       isExecuting: value,
+    })),
+
+  setIsRunningTests: (value) =>
+    set(() => ({
+      isRunningTests: value,
     })),
 
   // Chat session actions
@@ -457,7 +516,8 @@ __blueprint__ = LiquidityPool`,
           name: stored.name,
           content: stored.content,
           language: stored.name.endsWith('.py') ? 'python' : 'text',
-          path: `/contracts/${stored.name}`,
+          path: stored.type === 'test' ? `/tests/${stored.name}` : `/contracts/${stored.name}`,
+          type: (stored.type as 'contract' | 'test') || 'contract',
         }));
 
         // Get last active file ID from preferences
@@ -491,7 +551,7 @@ __blueprint__ = LiquidityPool`,
         content: file.content,
         lastModified: Date.now(),
         created: Date.now(), // This should ideally come from existing stored file
-        type: file.name.endsWith('.py') ? 'contract' : 'other',
+        type: file.type || (file.name.endsWith('.py') ? 'contract' : 'other'),
       };
 
       // Check if file exists to preserve created date

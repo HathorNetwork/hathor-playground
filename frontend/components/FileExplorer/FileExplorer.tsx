@@ -7,20 +7,25 @@ import { clsx } from 'clsx';
 
 export const FileExplorer: React.FC = () => {
   const { files, activeFileId, setActiveFile, addFile, deleteFile } = useIDEStore();
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [showNewFileInput, setShowNewFileInput] = useState(false);
+  const [isContractsExpanded, setIsContractsExpanded] = useState(true);
+  const [isTestsExpanded, setIsTestsExpanded] = useState(true);
+  const [showNewFileInput, setShowNewFileInput] = useState<'contracts' | 'tests' | null>(null);
   const [newFileName, setNewFileName] = useState('');
 
   const handleNewFile = () => {
-    if (newFileName.trim()) {
+    if (newFileName.trim() && showNewFileInput) {
+      const fileName = newFileName.endsWith('.py') ? newFileName : `${newFileName}.py`;
+      const cleanName = newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '');
+      
       const newFile = {
         id: Date.now().toString(),
-        name: newFileName.endsWith('.py') ? newFileName : `${newFileName}.py`,
-        content: `from hathor.nanocontracts import Blueprint
+        name: fileName,
+        content: showNewFileInput === 'contracts' 
+          ? `from hathor.nanocontracts import Blueprint
 from hathor.nanocontracts.context import Context
 from hathor.nanocontracts.types import public, view
 
-class ${newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '')}(Blueprint):
+class ${cleanName}(Blueprint):
     """Your contract description here"""
     
     # Contract state variables
@@ -31,14 +36,40 @@ class ${newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '')}(Blueprint):
         """Initialize the contract"""
         pass
 
-__blueprint__ = ${newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '')}`,
+__blueprint__ = ${cleanName}`
+          : `from tests.nanocontracts.bl_unittest import BlueprintTestCase
+
+class Test${cleanName}(BlueprintTestCase):
+    def setUp(self):
+        super().setUp()
+        # Register your blueprint class here
+        # self.blueprint_id = self._register_blueprint_class(${cleanName})
+        
+    def test_${cleanName.toLowerCase()}_example(self):
+        """Example test for ${cleanName} contract"""
+        # TODO: Add the blueprint class reference here
+        # Example: self.nc_catalog.blueprints[self.blueprint_id] = ${cleanName}
+        
+        # Create a contract instance for testing
+        # contract = ${cleanName}()
+        # context = self.create_context()
+        # contract.initialize(context)
+        
+        # Your test assertions here
+        assert True, "Replace with actual test logic"
+    
+    def test_${cleanName.toLowerCase()}_initialization(self):
+        """Test ${cleanName} initialization"""
+        # TODO: Implement initialization test
+        pass`,
         language: 'python',
-        path: `/contracts/${newFileName}`,
+        path: showNewFileInput === 'contracts' ? `/contracts/${fileName}` : `/tests/${fileName}`,
+        type: showNewFileInput,
       };
       
       addFile(newFile);
       setNewFileName('');
-      setShowNewFileInput(false);
+      setShowNewFileInput(null);
     }
   };
 
@@ -49,28 +80,33 @@ __blueprint__ = ${newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '')}`,
     }
   };
 
+  // Separate files by type
+  const contractFiles = files.filter((file: File) => file.type !== 'test');
+  const testFiles = files.filter((file: File) => file.type === 'test');
+
   return (
     <div className="h-full bg-gray-900 text-gray-100 p-4">
+      {/* Contracts Section */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
           <button
-            onClick={() => setIsExpanded(!isExpanded)}
+            onClick={() => setIsContractsExpanded(!isContractsExpanded)}
             className="flex items-center gap-2 hover:text-blue-400 transition-colors"
           >
-            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            {isContractsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             <FolderOpen size={16} />
             <span className="text-sm font-medium">Contracts</span>
           </button>
           <button
-            onClick={() => setShowNewFileInput(true)}
+            onClick={() => setShowNewFileInput('contracts')}
             className="p-1 hover:bg-gray-800 rounded transition-colors"
-            title="New File"
+            title="New Contract"
           >
             <Plus size={16} />
           </button>
         </div>
 
-        {showNewFileInput && (
+        {showNewFileInput === 'contracts' && (
           <div className="mb-2">
             <input
               type="text"
@@ -79,7 +115,7 @@ __blueprint__ = ${newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '')}`,
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleNewFile();
                 if (e.key === 'Escape') {
-                  setShowNewFileInput(false);
+                  setShowNewFileInput(null);
                   setNewFileName('');
                 }
               }}
@@ -90,38 +126,116 @@ __blueprint__ = ${newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '')}`,
             />
           </div>
         )}
+
+        {isContractsExpanded && (
+          <div className="space-y-1 ml-4">
+            {contractFiles.map((file: File) => (
+              <div
+                key={file.id}
+                onClick={() => setActiveFile(file.id)}
+                className={clsx(
+                  'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
+                  activeFileId === file.id
+                    ? 'bg-blue-600 text-white'
+                    : 'hover:bg-gray-800'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <FileText size={14} />
+                  <span className="text-sm">{file.name}</span>
+                </div>
+                {files.length > 1 && (
+                  <button
+                    onClick={(e) => handleDeleteFile(e, file.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all"
+                    title="Delete File"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {isExpanded && (
-        <div className="space-y-1">
-          {files.map((file: File) => (
-            <div
-              key={file.id}
-              onClick={() => setActiveFile(file.id)}
-              className={clsx(
-                'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
-                activeFileId === file.id
-                  ? 'bg-blue-600 text-white'
-                  : 'hover:bg-gray-800'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <FileText size={14} />
-                <span className="text-sm">{file.name}</span>
-              </div>
-              {files.length > 1 && (
-                <button
-                  onClick={(e) => handleDeleteFile(e, file.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all"
-                  title="Delete File"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </div>
-          ))}
+      {/* Tests Section */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <button
+            onClick={() => setIsTestsExpanded(!isTestsExpanded)}
+            className="flex items-center gap-2 hover:text-green-400 transition-colors"
+          >
+            {isTestsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            <FolderOpen size={16} />
+            <span className="text-sm font-medium">Tests</span>
+          </button>
+          <button
+            onClick={() => setShowNewFileInput('tests')}
+            className="p-1 hover:bg-gray-800 rounded transition-colors"
+            title="New Test"
+          >
+            <Plus size={16} />
+          </button>
         </div>
-      )}
+
+        {showNewFileInput === 'tests' && (
+          <div className="mb-2">
+            <input
+              type="text"
+              value={newFileName}
+              onChange={(e) => setNewFileName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleNewFile();
+                if (e.key === 'Escape') {
+                  setShowNewFileInput(null);
+                  setNewFileName('');
+                }
+              }}
+              onBlur={handleNewFile}
+              placeholder="test_filename.py"
+              className="w-full px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded focus:outline-none focus:border-blue-500"
+              autoFocus
+            />
+          </div>
+        )}
+
+        {isTestsExpanded && (
+          <div className="space-y-1 ml-4">
+            {testFiles.map((file: File) => (
+              <div
+                key={file.id}
+                onClick={() => setActiveFile(file.id)}
+                className={clsx(
+                  'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
+                  activeFileId === file.id
+                    ? 'bg-green-600 text-white'
+                    : 'hover:bg-gray-800'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <FileText size={14} />
+                  <span className="text-sm">{file.name}</span>
+                </div>
+                {files.length > 1 && (
+                  <button
+                    onClick={(e) => handleDeleteFile(e, file.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all"
+                    title="Delete File"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {testFiles.length === 0 && (
+              <div className="text-gray-500 text-sm px-2 py-1 italic">
+                No test files yet
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

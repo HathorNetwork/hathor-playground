@@ -28,8 +28,10 @@ export function IDE() {
     addConsoleMessage,
     setIsCompiling,
     setIsExecuting,
+    setIsRunningTests,
     isCompiling,
     isExecuting,
+    isRunningTests,
     addCompiledContract,
     clearContractInstances,
     initializeStore,
@@ -40,9 +42,9 @@ export function IDE() {
     initializeStore();
   }, [initializeStore]);
 
-  // Auto-compile when switching to a different file
+  // Auto-compile when switching to a different contract file (not test files)
   React.useEffect(() => {
-    if (activeFile && isPyodideReady && !isCompiling) {
+    if (activeFile && activeFile.type !== 'test' && isPyodideReady && !isCompiling) {
       // Add a small delay to avoid rapid recompilation during initialization
       const timer = setTimeout(() => {
         addConsoleMessage('info', `Auto-compiling ${activeFile.name}...`);
@@ -172,6 +174,89 @@ export function IDE() {
     }
   };
 
+  const handleRunTests = async () => {
+    if (!activeFile || activeFile.type !== 'test') return;
+
+    setIsRunningTests(true);
+    addConsoleMessage('info', `Running tests from ${activeFile.name}...`);
+
+    try {
+      // Import test parsing utilities
+      const { validateTestBlueprints, combineCodeForTesting } = await import('../utils/testParser');
+      const { pyodideRunner } = await import('../lib/pyodide-runner');
+      
+      // Get all contract files
+      const contractFiles = files.filter(file => file.type !== 'test');
+      
+      // Validate test file and find blueprint references
+      addConsoleMessage('info', 'Analyzing test file for blueprint references...');
+      const validation = validateTestBlueprints(activeFile, contractFiles);
+      
+      if (!validation.isValid) {
+        validation.errors.forEach(error => {
+          addConsoleMessage('error', `❌ ${error}`);
+        });
+        return;
+      }
+      
+      addConsoleMessage('info', `Found ${validation.references.length} blueprint reference(s)`);
+      
+      // Generate combined code for testing
+      const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
+      
+      addConsoleMessage('info', 'Executing tests with pytest...');
+      
+      // Run tests using pyodide
+      const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
+      
+      // Show detailed test results
+      if (testResult.success) {
+        const testsRun = testResult.tests_run || 0;
+        const testsPassed = testResult.tests_passed || 0;
+        addConsoleMessage('success', `✅ All ${testsRun} test(s) passed successfully`);
+      } else {
+        const testsRun = testResult.tests_run || 0;
+        const testsPassed = testResult.tests_passed || 0;
+        const testsFailed = testResult.tests_failed || 0;
+        
+        if (testsRun > 0) {
+          addConsoleMessage('error', `❌ Tests completed: ${testsPassed} passed, ${testsFailed} failed`);
+        } else {
+          addConsoleMessage('error', '❌ No tests were executed');
+        }
+      }
+      
+      // Always show the detailed output
+      if (testResult.output) {
+        // Split output into lines and add each as a separate message for better formatting
+        const outputLines = testResult.output.split('\n').filter(line => line.trim());
+        outputLines.forEach(line => {
+          // Color code based on content
+          if (line.includes('PASSED')) {
+            addConsoleMessage('success', `📋 ${line}`);
+          } else if (line.includes('FAILED')) {
+            addConsoleMessage('error', `📋 ${line}`);
+          } else if (line.includes('Found') || line.includes('Ran')) {
+            addConsoleMessage('info', `📋 ${line}`);
+          } else {
+            addConsoleMessage('info', `📋 ${line}`);
+          }
+        });
+      }
+      
+      // Show additional error details if available
+      if (testResult.error && !testResult.success) {
+        addConsoleMessage('error', `💥 Error details: ${testResult.error}`);
+      }
+      
+    } catch (error: any) {
+      addConsoleMessage('error', `Test running error: ${error.message || error}`);
+      console.error('Full test execution error:', error);
+    } finally {
+      setIsRunningTests(false);
+    }
+  };
+
   const toggleFileExplorer = () => {
     const newCollapsed = !isFileExplorerCollapsed;
     setIsFileExplorerCollapsed(newCollapsed);
@@ -193,10 +278,6 @@ export function IDE() {
   return (
     <div className="h-screen flex flex-col bg-gray-900">
       <Toolbar
-        onCompile={handleCompile}
-        onExecute={handleExecute}
-        isCompiling={isCompiling}
-        isExecuting={isExecuting}
         fileName={activeFile?.name}
       />
       
@@ -232,7 +313,11 @@ export function IDE() {
         <div className="flex-1">
           <PanelGroup direction="horizontal">
             <Panel defaultSize={30} minSize={15} maxSize={35}>
-              <MethodExecutor blueprintId={currentBlueprintId} />
+              <MethodExecutor 
+                blueprintId={currentBlueprintId} 
+                onCompile={handleCompile}
+                onRunTests={handleRunTests}
+              />
             </Panel>
             
             <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
