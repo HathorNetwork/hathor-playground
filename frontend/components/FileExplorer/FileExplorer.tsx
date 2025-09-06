@@ -164,7 +164,7 @@ class Test${cleanName}(BlueprintTestCase):
         <div className="flex items-center justify-between mb-2">
           <button
             onClick={() => setIsTestsExpanded(!isTestsExpanded)}
-            className="flex items-center gap-2 hover:text-green-400 transition-colors"
+            className="flex items-center gap-2 hover:text-blue-400 transition-colors"
           >
             {isTestsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             <FolderOpen size={16} />
@@ -209,7 +209,7 @@ class Test${cleanName}(BlueprintTestCase):
                 className={clsx(
                   'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
                   activeFileId === file.id
-                    ? 'bg-green-600 text-white'
+                    ? 'bg-blue-600 text-white'
                     : 'hover:bg-gray-800'
                 )}
               >

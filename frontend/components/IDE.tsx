@@ -189,7 +189,6 @@ export function IDE() {
       const contractFiles = files.filter(file => file.type !== 'test');
       
       // Validate test file and find blueprint references
-      addConsoleMessage('info', 'Analyzing test file for blueprint references...');
       const validation = validateTestBlueprints(activeFile, contractFiles);
       
       if (!validation.isValid) {
@@ -199,12 +198,10 @@ export function IDE() {
         return;
       }
       
-      addConsoleMessage('info', `Found ${validation.references.length} blueprint reference(s)`);
       
       // Generate combined code for testing
       const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
       
-      addConsoleMessage('info', 'Executing tests with pytest...');
       
       // Run tests using pyodide
       const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
@@ -226,22 +223,9 @@ export function IDE() {
         }
       }
       
-      // Always show the detailed output
-      if (testResult.output) {
-        // Split output into lines and add each as a separate message for better formatting
-        const outputLines = testResult.output.split('\n').filter(line => line.trim());
-        outputLines.forEach(line => {
-          // Color code based on content
-          if (line.includes('PASSED')) {
-            addConsoleMessage('success', `📋 ${line}`);
-          } else if (line.includes('FAILED')) {
-            addConsoleMessage('error', `📋 ${line}`);
-          } else if (line.includes('Found') || line.includes('Ran')) {
-            addConsoleMessage('info', `📋 ${line}`);
-          } else {
-            addConsoleMessage('info', `📋 ${line}`);
-          }
-        });
+      // Show pytest output as collapsible code block
+      if (testResult.output && testResult.output.trim()) {
+        addConsoleMessage('code', testResult.output.trim(), 'Pytest Output', false);
       }
       
       // Show additional error details if available
