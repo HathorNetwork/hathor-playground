@@ -3,6 +3,7 @@
  */
 
 import { getHathorTestMocks } from './hathorTestMocks';
+import { getHathorHelpers } from './hathorHelpers';
 
 export interface BlueprintReference {
   variableName: string; // e.g., "self.blueprint_id" 
@@ -122,7 +123,7 @@ from unittest.mock import MagicMock
 # Import our Hathor test framework mocks
 `;
   
-  // Add the Hathor test mocks
+  // Add the Hathor test mocks (which now include the helpers)
   combinedCode += getHathorTestMocks();
   
 /*
