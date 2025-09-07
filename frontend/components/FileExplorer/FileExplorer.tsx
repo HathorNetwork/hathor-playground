@@ -37,34 +37,10 @@ class ${cleanName}(Blueprint):
         pass
 
 __blueprint__ = ${cleanName}`
-          : `from tests.nanocontracts.bl_unittest import BlueprintTestCase
-
-class Test${cleanName}(BlueprintTestCase):
-    def setUp(self):
-        super().setUp()
-        # Register your blueprint class here
-        # self.blueprint_id = self._register_blueprint_class(${cleanName})
-        
-    def test_${cleanName.toLowerCase()}_example(self):
-        """Example test for ${cleanName} contract"""
-        # TODO: Add the blueprint class reference here
-        # Example: self.nc_catalog.blueprints[self.blueprint_id] = ${cleanName}
-        
-        # Create a contract instance for testing
-        # contract = ${cleanName}()
-        # context = self.create_context()
-        # contract.initialize(context)
-        
-        # Your test assertions here
-        assert True, "Replace with actual test logic"
-    
-    def test_${cleanName.toLowerCase()}_initialization(self):
-        """Test ${cleanName} initialization"""
-        # TODO: Implement initialization test
-        pass`,
+          : '',
         language: 'python',
         path: showNewFileInput === 'contracts' ? `/contracts/${fileName}` : `/tests/${fileName}`,
-        type: showNewFileInput,
+        type: showNewFileInput === 'contracts' ? 'contract' : 'test',
       };
       
       addFile(newFile);
