@@ -90,6 +90,7 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => ({
       name: 'SimpleCounter.py',
       content: `from hathor.nanocontracts import Blueprint
 from hathor.nanocontracts.context import Context
+from hathor.nanocontracts.exception import NCFail
 from hathor.nanocontracts.types import public, view
 
 class SimpleCounter(Blueprint):
@@ -107,7 +108,7 @@ class SimpleCounter(Blueprint):
     def increment(self, ctx: Context, amount: int) -> None:
         """Increment the counter by the specified amount"""
         if amount <= 0:
-            raise ValueError("Amount must be positive")
+            raise NegativeIncrement("Amount must be positive")
         
         self.count += amount
     
@@ -120,6 +121,10 @@ class SimpleCounter(Blueprint):
     def reset(self, ctx: Context) -> None:
         """Reset the counter to zero"""
         self.count = 0
+
+
+class NegativeIncrement(NCFail):
+    pass
 
 __blueprint__ = SimpleCounter`,
       language: 'python',
@@ -237,47 +242,57 @@ __blueprint__ = LiquidityPool`,
     {
       id: '3',
       name: 'test_simple_counter.py',
-      content: `from tests.nanocontracts.bl_unittest import BlueprintTestCase
+      content: `from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
 
-class TestSimpleCounter(BlueprintTestCase):
+
+COUNTER_NC_TYPE = make_nc_type(int)
+
+
+class CounterTestCase(BlueprintTestCase):
     def setUp(self):
         super().setUp()
-        # Blueprint reference for SimpleCounter
-        self.nc_catalog.blueprints["simple_counter_id"] = SimpleCounter
-        
-    def test_simple_counter_initialization(self):
-        """Test SimpleCounter initialization"""
-        # Create an instance for testing
-        counter = SimpleCounter()
-        context = self.create_context()
-        counter.initialize(context)
-        
-        # Test initial state
-        assert counter.count == 0, "Counter should start at 0"
 
-    def test_simple_counter_increment(self):
-        """Test SimpleCounter increment functionality"""
-        counter = SimpleCounter()
-        context = self.create_context()
-        counter.initialize(context)
-        
-        # Test incrementing
-        counter.increment(context, 5)
-        assert counter.count == 5, "Counter should be 5 after increment"
-        
-        counter.increment(context, 3)
-        assert counter.count == 8, "Counter should be 8 after another increment"
+        self.blueprint_id = self.gen_random_blueprint_id()
+        self.contract_id = self.gen_random_contract_id()
+        self.address = self.gen_random_address()
 
-    def test_simple_counter_reset(self):
-        """Test SimpleCounter reset functionality"""
-        counter = SimpleCounter()
-        context = self.create_context()
-        counter.initialize(context)
-        counter.increment(context, 10)
-        
-        # Reset the counter
-        counter.reset(context)
-        assert counter.count == 0, "Counter should be 0 after reset"`,
+        self.nc_catalog.blueprints[self.blueprint_id] = SimpleCounter
+        self.tx = self.get_genesis_tx()
+
+
+    def test_lifecycle(self) -> None:
+        context = self.create_context(
+            vertex=self.tx,
+            caller_id=self.address,
+            timestamp=self.now
+        )
+
+        # Create a contract.
+        self.runner.create_contract(
+            self.contract_id,
+            self.blueprint_id,
+            context,
+        )
+
+        self.nc_storage = self.runner.get_storage(self.contract_id)
+
+        self.assertEqual(0, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))
+
+        # increment
+        AMOUNT = 3
+        self.runner.call_public_method(self.contract_id, 'increment', context, AMOUNT)
+        self.assertEqual(AMOUNT, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))
+
+        # call get_count
+        ret = self.runner.call_view_method(self.contract_id, 'get_count')
+        self.assertEqual(AMOUNT, ret)
+
+        with self.assertRaises(NegativeIncrement):
+            self.runner.call_public_method(self.contract_id, 'increment', context, -2)
+
+        # reset
+        self.runner.call_public_method(self.contract_id, 'reset', context)
+        self.assertEqual(0, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))`,
       language: 'python',
       path: '/tests/test_simple_counter.py',
       type: 'test',
