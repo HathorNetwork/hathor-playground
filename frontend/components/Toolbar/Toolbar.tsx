@@ -1,22 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Play, Zap, FileCode, Settings, HelpCircle, Loader2 } from 'lucide-react';
-import { clsx } from 'clsx';
+import { FileCode, Settings, HelpCircle } from 'lucide-react';
 
 interface ToolbarProps {
-  onCompile: () => void;
-  onExecute: () => void;
-  isCompiling: boolean;
-  isExecuting: boolean;
   fileName?: string;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
-  onCompile,
-  onExecute,
-  isCompiling,
-  isExecuting,
   fileName,
 }) => {
   return (
@@ -38,46 +29,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Compile Button */}
-          <button
-            onClick={onCompile}
-            disabled={isCompiling || isExecuting}
-            className={clsx(
-              'flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors',
-              isCompiling || isExecuting
-                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            )}
-          >
-            {isCompiling ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Zap size={16} />
-            )}
-            {isCompiling ? 'Compiling...' : 'Compile'}
-          </button>
-
-          {/* Run Button */}
-          <button
-            onClick={onExecute}
-            disabled={isCompiling || isExecuting}
-            className={clsx(
-              'flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors',
-              isCompiling || isExecuting
-                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                : 'bg-green-600 text-white hover:bg-green-700'
-            )}
-          >
-            {isExecuting ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Play size={16} />
-            )}
-            {isExecuting ? 'Executing...' : 'Quick Execute'}
-          </button>
-
-          <div className="border-l border-gray-600 h-6 mx-2" />
-
           {/* Settings Button */}
           <button
             className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"

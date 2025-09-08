@@ -9,6 +9,7 @@ export interface File {
   content: string;
   language: string;
   path: string;
+  type?: 'contract' | 'test';
 }
 
 export interface ConsoleMessage {
@@ -45,6 +46,7 @@ interface IDEState {
   // UI State
   isCompiling: boolean;
   isExecuting: boolean;
+  isRunningTests: boolean;
   isStorageInitialized: boolean;
 
   // Actions
@@ -63,6 +65,7 @@ interface IDEState {
 
   setIsCompiling: (value: boolean) => void;
   setIsExecuting: (value: boolean) => void;
+  setIsRunningTests: (value: boolean) => void;
 
   // Chat session actions
   createChatSession: () => string;
@@ -87,6 +90,7 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => ({
       name: 'SimpleCounter.py',
       content: `from hathor.nanocontracts import Blueprint
 from hathor.nanocontracts.context import Context
+from hathor.nanocontracts.exception import NCFail
 from hathor.nanocontracts.types import public, view
 
 class SimpleCounter(Blueprint):
@@ -104,7 +108,7 @@ class SimpleCounter(Blueprint):
     def increment(self, ctx: Context, amount: int) -> None:
         """Increment the counter by the specified amount"""
         if amount <= 0:
-            raise ValueError("Amount must be positive")
+            raise NegativeIncrement("Amount must be positive")
         
         self.count += amount
     
@@ -118,9 +122,14 @@ class SimpleCounter(Blueprint):
         """Reset the counter to zero"""
         self.count = 0
 
+
+class NegativeIncrement(NCFail):
+    pass
+
 __blueprint__ = SimpleCounter`,
       language: 'python',
       path: '/contracts/SimpleCounter.py',
+      type: 'contract',
     },
     {
       id: '2',
@@ -228,6 +237,65 @@ class LiquidityPool(Blueprint):
 __blueprint__ = LiquidityPool`,
       language: 'python',
       path: '/contracts/LiquidityPool.py',
+      type: 'contract',
+    },
+    {
+      id: '3',
+      name: 'test_simple_counter.py',
+      content: `from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
+
+
+COUNTER_NC_TYPE = make_nc_type(int)
+
+
+class CounterTestCase(BlueprintTestCase):
+    def setUp(self):
+        super().setUp()
+
+        self.blueprint_id = self.gen_random_blueprint_id()
+        self.contract_id = self.gen_random_contract_id()
+        self.address = self.gen_random_address()
+
+        self.nc_catalog.blueprints[self.blueprint_id] = SimpleCounter
+        self.tx = self.get_genesis_tx()
+
+
+    def test_lifecycle(self) -> None:
+        context = self.create_context(
+            vertex=self.tx,
+            caller_id=self.address,
+            timestamp=self.now
+        )
+
+        # Create a contract.
+        self.runner.create_contract(
+            self.contract_id,
+            self.blueprint_id,
+            context,
+        )
+
+        self.nc_storage = self.runner.get_storage(self.contract_id)
+
+        self.assertEqual(0, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))
+
+        # increment
+        AMOUNT = 3
+        self.runner.call_public_method(self.contract_id, 'increment', context, AMOUNT)
+        self.assertEqual(AMOUNT, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))
+
+        # call get_count
+        ret = self.runner.call_view_method(self.contract_id, 'get_count')
+        self.assertEqual(AMOUNT, ret)
+
+        with self.assertRaises(NegativeIncrement):
+            self.runner.call_public_method(self.contract_id, 'increment', context, -2)
+
+        # reset
+        self.runner.call_public_method(self.contract_id, 'reset', context)
+        self.assertEqual(0, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))`,
+      language: 'python',
+      path: '/tests/test_simple_counter.py',
+      type: 'test',
     },
   ],
   activeFileId: '1',
@@ -242,6 +310,7 @@ __blueprint__ = LiquidityPool`,
 
   isCompiling: false,
   isExecuting: false,
+  isRunningTests: false,
   isStorageInitialized: false,
 
   // Actions
@@ -347,6 +416,11 @@ __blueprint__ = LiquidityPool`,
   setIsExecuting: (value) =>
     set(() => ({
       isExecuting: value,
+    })),
+
+  setIsRunningTests: (value) =>
+    set(() => ({
+      isRunningTests: value,
     })),
 
   // Chat session actions
@@ -457,7 +531,8 @@ __blueprint__ = LiquidityPool`,
           name: stored.name,
           content: stored.content,
           language: stored.name.endsWith('.py') ? 'python' : 'text',
-          path: `/contracts/${stored.name}`,
+          path: stored.type === 'test' ? `/tests/${stored.name}` : `/contracts/${stored.name}`,
+          type: (stored.type as 'contract' | 'test') || 'contract',
         }));
 
         // Get last active file ID from preferences
@@ -491,7 +566,7 @@ __blueprint__ = LiquidityPool`,
         content: file.content,
         lastModified: Date.now(),
         created: Date.now(), // This should ideally come from existing stored file
-        type: file.name.endsWith('.py') ? 'contract' : 'other',
+        type: file.type || (file.name.endsWith('.py') ? 'contract' : 'other'),
       };
 
       // Check if file exists to preserve created date

@@ -1,26 +1,28 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Settings } from 'lucide-react';
+import { Play, Settings, Zap, TestTube, Loader2 } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
-import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
+import { parseContractMethods } from '@/utils/contractParser';
 import { generateFrontendPrompt } from '@/utils/promptGenerator';
 
 interface MethodExecutorProps {
   blueprintId?: string;
+  onCompile: () => void;
+  onRunTests: () => void;
 }
 
-export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) => {
+export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onCompile, onRunTests }) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
-  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance } = useIDEStore();
+  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
 
   // Get current file content to parse methods
   const activeFile = files.find((f: File) => f.id === activeFileId);
-  
+
   // Parse methods from current file
   const methodDefinitions = useMemo(() => {
     if (!activeFile?.content) return [];
@@ -105,7 +107,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
 
     // For initialize, use blueprint ID. For other methods, use contract ID
     const targetId = selectedMethod === 'initialize' ? blueprintId : contractId;
-    
+
     if (selectedMethod !== 'initialize' && !contractId) {
       addConsoleMessage('error', 'Please initialize the contract first before calling other methods.');
       return;
@@ -117,7 +119,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     try {
       // Get current method definition
       const currentMethod = methodDefinitions.find(m => m.name === selectedMethod);
-      
+
       // Prepare arguments from parameter values
       let args: any[] = [];
       if (currentMethod?.parameters && currentMethod.parameters.length > 0) {
@@ -194,11 +196,11 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
 
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
-        
+
         // If this was initialize, capture the contract ID and store in global state
         if (selectedMethod === 'initialize' && result.result && typeof result.result === 'object' && 'contract_id' in result.result) {
           const newContractId = (result.result as any).contract_id;
-          
+
           // Create contract instance and store it in the global state
           const newInstance: ContractInstance = {
             blueprintId: blueprintId!,
@@ -206,7 +208,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
             contractName: activeFile?.name.replace('.py', '') || 'Unknown',
             timestamp: new Date()
           };
-          
+
           addContractInstance(newInstance);
           addConsoleMessage('info', `Contract created with ID: ${newContractId}`);
         } else if (result.result !== undefined && result.result !== null) {
@@ -218,7 +220,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
         // Show detailed error message
         const errorMessage = result.error || 'Unknown error occurred';
         addConsoleMessage('error', `❌ Method execution failed:`);
-        
+
         // Parse and display error details
         if (errorMessage.includes('AttributeError')) {
           addConsoleMessage('error', `  → ${errorMessage}`);
@@ -242,7 +244,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     }
   };
 
-  if (!blueprintId) {
+  if (!blueprintId && activeFile?.type !== 'test') {
     return (
       <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
@@ -253,7 +255,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     );
   }
 
-  if (methodDefinitions.length === 0) {
+  if (methodDefinitions.length === 0 && activeFile?.type !== 'test') {
     return (
       <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
@@ -287,7 +289,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
             </div>
           </div>
         )}
-        
+
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Caller Address:
@@ -423,10 +425,10 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
             ) : (
               <input
                 type={
-                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp' 
-                    ? 'number' 
-                    : param.type === 'float' 
-                      ? 'number' 
+                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp'
+                    ? 'number'
+                    : param.type === 'float'
+                      ? 'number'
                       : 'text'
                 }
                 value={parameterValues[param.name] || ''}
@@ -436,19 +438,19 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
                 step={param.type === 'float' ? '0.1' : param.type === 'amount' || param.type === 'timestamp' ? '1' : undefined}
                 min={param.type === 'amount' || param.type === 'timestamp' ? '0' : undefined}
                 maxLength={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? 64 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? 64
                     : undefined
                 }
                 pattern={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? '[0-9a-fA-F]{64}' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? '[0-9a-fA-F]{64}'
                     : param.type === 'hex'
                       ? '[0-9a-fA-F]*'
                       : undefined
                 }
                 title={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
                     ? 'Enter exactly 64 hexadecimal characters (0-9, a-f, A-F)'
                     : param.type === 'hex'
                       ? 'Enter hexadecimal characters (0-9, a-f, A-F)'
@@ -463,18 +465,62 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
           </div>
         ))}
 
-        <button
-          onClick={handleExecute}
-          disabled={isExecuting}
-          className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
-            isExecuting
+        {/* Run Tests Button - only show for test files */}
+        {activeFile?.type === 'test' && (
+          <button
+            onClick={onRunTests}
+            disabled={isRunningTests || isCompiling}
+            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${isRunningTests || isCompiling
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-purple-600 text-white hover:bg-purple-700'
+              }`}
+          >
+            {isRunningTests ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <TestTube size={16} />
+            )}
+            {isRunningTests ? 'Running Tests...' : 'Run Tests'}
+          </button>
+        )}
+
+        {/* Compile Button - only show for contract files */}
+        {activeFile?.type !== 'test' && (
+          <button
+            onClick={onCompile}
+            disabled={isCompiling || isExecuting || isRunningTests}
+            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${isCompiling || isExecuting || isRunningTests
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+          >
+            {isCompiling ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Zap size={16} />
+            )}
+            {isCompiling ? 'Compiling...' : 'Compile'}
+          </button>
+        )}
+
+        {/* Execute Method Button - only show for contract files when compiled */}
+        {activeFile?.type !== 'test' && (
+          <button
+            onClick={handleExecute}
+            disabled={isExecuting || isCompiling || isRunningTests}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${isExecuting || isCompiling || isRunningTests
               ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
               : 'bg-green-600 text-white hover:bg-green-700'
-          }`}
-        >
-          <Play size={16} />
-          {isExecuting ? 'Executing...' : `Execute ${selectedMethod}`}
-        </button>
+              }`}
+          >
+            {isExecuting ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Play size={16} />
+            )}
+            {isExecuting ? 'Executing...' : `Execute ${selectedMethod}`}
+          </button>
+        )}
       </div>
     </div>
   );
