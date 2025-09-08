@@ -2,3 +2,4 @@ backend/.env
 .env
 *.tar.gz
 .direnv/
+.claude/settings.local.json

@@ -1,113 +1,33 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Settings } from 'lucide-react';
+import { Play, Settings, Zap, TestTube, Loader2 } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
-import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
+import { parseContractMethods } from '@/utils/contractParser';
 import { generateFrontendPrompt } from '@/utils/promptGenerator';
-import { pyodideRunner } from '@/lib/pyodide-runner';
 
 interface MethodExecutorProps {
   blueprintId?: string;
+  onCompile: () => void;
+  onRunTests: () => void;
 }
 
-interface MethodParameter {
-  name: string;
-  type: string;
-  description?: string;
-  placeholder?: string;
-}
-
-interface MethodDefinition {
-  name: string;
-  description: string;
-  parameters: MethodParameter[];
-  returnType?: string;
-  decorator: 'public' | 'view';
-}
-
-export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) => {
+export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onCompile, onRunTests }) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
-  const [blueprintInfo, setBlueprintInfo] = useState<any>(null);
-  const [isLoadingMethods, setIsLoadingMethods] = useState(false);
-  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance } = useIDEStore();
+  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
 
-  // Get current file content 
+  // Get current file content to parse methods
   const activeFile = files.find((f: File) => f.id === activeFileId);
-  
-  // Load blueprint info using Hathor's native BlueprintInfoResource
-  useEffect(() => {
-    if (blueprintId && pyodideRunner.isReady()) {
-      // Clear old blueprint info first
-      setBlueprintInfo(null);
-      setIsLoadingMethods(true);
-      pyodideRunner.getBlueprintInfo(blueprintId)
-        .then(result => {
-          if (result.success && result.blueprintInfo) {
-            setBlueprintInfo(result.blueprintInfo);
-            console.log('✅ Loaded blueprint info:', result.blueprintInfo);
-          } else {
-            console.error('❌ Failed to load blueprint info:', result.error);
-            addConsoleMessage('error', `Failed to load contract methods: ${result.error}`);
-          }
-        })
-        .catch(error => {
-          console.error('❌ Error loading blueprint info:', error);
-          addConsoleMessage('error', `Error loading contract methods: ${error}`);
-        })
-        .finally(() => {
-          setIsLoadingMethods(false);
-        });
-    } else if (!blueprintId) {
-      // No blueprint ID, clear the info
-      setBlueprintInfo(null);
-    }
-  }, [blueprintId, addConsoleMessage]);
 
-  // Convert blueprint info to method definitions format
-  const methodDefinitions = useMemo((): MethodDefinition[] => {
-    if (!blueprintInfo) return [];
-    
-    const methods: MethodDefinition[] = [];
-    
-    // Add public methods
-    Object.entries(blueprintInfo.public_methods || {}).forEach(([name, info]: [string, any]) => {
-      methods.push({
-        name,
-        description: info.docstring || `Public method`,
-        parameters: info.args.map((arg: any): MethodParameter => ({
-          name: arg.name,
-          type: mapHathorTypeToUI(arg.type),
-          description: `${arg.name} (${arg.type})`,
-          placeholder: getPlaceholderForType(mapHathorTypeToUI(arg.type), arg.name)
-        })),
-        returnType: info.return_type,
-        decorator: 'public'
-      });
-    });
-    
-    // Add view methods
-    Object.entries(blueprintInfo.view_methods || {}).forEach(([name, info]: [string, any]) => {
-      methods.push({
-        name,
-        description: info.docstring || `View method`,
-        parameters: info.args.map((arg: any): MethodParameter => ({
-          name: arg.name,
-          type: mapHathorTypeToUI(arg.type),
-          description: `${arg.name} (${arg.type})`,
-          placeholder: getPlaceholderForType(mapHathorTypeToUI(arg.type), arg.name)
-        })),
-        returnType: info.return_type,
-        decorator: 'view'
-      });
-    });
-    
-    return methods;
-  }, [blueprintInfo]);
+  // Parse methods from current file
+  const methodDefinitions = useMemo(() => {
+    if (!activeFile?.content) return [];
+    return parseContractMethods(activeFile.content);
+  }, [activeFile?.content]);
 
   // Get contract instance from store (persisted across address changes)
   const contractInstance = blueprintId ? getContractInstance(blueprintId) : null;
@@ -163,64 +83,6 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     },
   };
 
-// Helper functions for type mapping
-function mapHathorTypeToUI(hathorType: string): string {
-  const typeMapping: Record<string, string> = {
-    'Address': 'address',
-    'TokenUid': 'tokenuid', 
-    'ContractId': 'contractid',
-    'BlueprintId': 'blueprintid',
-    'VertexId': 'vertexid',
-    'Amount': 'amount',
-    'Timestamp': 'timestamp',
-    'bytes': 'hex',
-    'int': 'int',
-    'str': 'string',
-    'float': 'float',
-    'bool': 'boolean',
-    'null': 'null'
-  };
-  
-  // Handle optional types (e.g., "str?" -> "string")
-  if (hathorType.endsWith('?')) {
-    const baseType = hathorType.slice(0, -1);
-    return typeMapping[baseType] || baseType;
-  }
-  
-  return typeMapping[hathorType] || hathorType;
-}
-
-function getPlaceholderForType(type: string, paramName: string): string {
-  switch (type) {
-    case 'address':
-      return 'Select from dropdown';
-    case 'tokenuid':
-      return 'Enter token UID (64 hex chars)';
-    case 'contractid':
-      return 'Enter contract ID (64 hex chars)';
-    case 'blueprintid':
-      return 'Enter blueprint ID (64 hex chars)';
-    case 'vertexid':
-      return 'Enter vertex ID (64 hex chars)';
-    case 'amount':
-      return 'Enter amount (e.g., 1025 = 10.25 tokens)';
-    case 'timestamp':
-      return 'Enter timestamp (e.g., 1578052800)';
-    case 'hex':
-      return 'Enter hex string (e.g., deadbeef...)';
-    case 'int':
-      return '0';
-    case 'string':
-      return `Enter ${paramName}`;
-    case 'float':
-      return '0.0';
-    case 'boolean':
-      return 'true';
-    default:
-      return `Enter ${paramName}`;
-  }
-}
-
   const handleGeneratePrompt = () => {
     if (!activeFile) {
       addConsoleMessage('error', 'No contract file loaded.');
@@ -245,7 +107,7 @@ function getPlaceholderForType(type: string, paramName: string): string {
 
     // For initialize, use blueprint ID. For other methods, use contract ID
     const targetId = selectedMethod === 'initialize' ? blueprintId : contractId;
-    
+
     if (selectedMethod !== 'initialize' && !contractId) {
       addConsoleMessage('error', 'Please initialize the contract first before calling other methods.');
       return;
@@ -257,7 +119,7 @@ function getPlaceholderForType(type: string, paramName: string): string {
     try {
       // Get current method definition
       const currentMethod = methodDefinitions.find(m => m.name === selectedMethod);
-      
+
       // Prepare arguments from parameter values
       let args: any[] = [];
       if (currentMethod?.parameters && currentMethod.parameters.length > 0) {
@@ -334,11 +196,11 @@ function getPlaceholderForType(type: string, paramName: string): string {
 
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
-        
+
         // If this was initialize, capture the contract ID and store in global state
         if (selectedMethod === 'initialize' && result.result && typeof result.result === 'object' && 'contract_id' in result.result) {
           const newContractId = (result.result as any).contract_id;
-          
+
           // Create contract instance and store it in the global state
           const newInstance: ContractInstance = {
             blueprintId: blueprintId!,
@@ -346,7 +208,7 @@ function getPlaceholderForType(type: string, paramName: string): string {
             contractName: activeFile?.name.replace('.py', '') || 'Unknown',
             timestamp: new Date()
           };
-          
+
           addContractInstance(newInstance);
           addConsoleMessage('info', `Contract created with ID: ${newContractId}`);
         } else if (result.result !== undefined && result.result !== null) {
@@ -358,7 +220,7 @@ function getPlaceholderForType(type: string, paramName: string): string {
         // Show detailed error message
         const errorMessage = result.error || 'Unknown error occurred';
         addConsoleMessage('error', `❌ Method execution failed:`);
-        
+
         // Parse and display error details
         if (errorMessage.includes('AttributeError')) {
           addConsoleMessage('error', `  → ${errorMessage}`);
@@ -382,7 +244,7 @@ function getPlaceholderForType(type: string, paramName: string): string {
     }
   };
 
-  if (!blueprintId) {
+  if (!blueprintId && activeFile?.type !== 'test') {
     return (
       <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
@@ -393,19 +255,7 @@ function getPlaceholderForType(type: string, paramName: string): string {
     );
   }
 
-  if (isLoadingMethods) {
-    return (
-      <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
-        <div className="text-gray-400 text-center">
-          <Settings className="mx-auto mb-2 animate-spin" size={20} />
-          <p className="text-sm">Loading contract methods...</p>
-          <p className="text-xs mt-1">Using Hathor's native method introspection</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (methodDefinitions.length === 0) {
+  if (methodDefinitions.length === 0 && activeFile?.type !== 'test') {
     return (
       <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
@@ -439,7 +289,7 @@ function getPlaceholderForType(type: string, paramName: string): string {
             </div>
           </div>
         )}
-        
+
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Caller Address:
@@ -471,28 +321,18 @@ function getPlaceholderForType(type: string, paramName: string): string {
           >
             {methodDefinitions.map((method) => (
               <option key={method.name} value={method.name}>
-                [{method.decorator}] {method.name}({method.parameters.length} params) → {method.returnType}
+                {method.name} - {method.description}
               </option>
             ))}
           </select>
-          {/* Show method description below dropdown */}
-          {methodDefinitions.find(m => m.name === selectedMethod)?.description && (
-            <div className="text-xs text-gray-400 mt-1 p-2 bg-gray-900 rounded">
-              {methodDefinitions.find(m => m.name === selectedMethod)?.description}
-            </div>
-          )}
         </div>
 
         {/* Parameter inputs */}
         {methodDefinitions.find(m => m.name === selectedMethod)?.parameters.map((param) => (
           <div key={param.name}>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              {param.name} <span className="text-blue-400">({param.type})</span>
-              {param.description && (
-                <span className="text-gray-400 text-xs ml-1 block">
-                  {param.description}
-                </span>
-              )}
+              {param.name} ({param.type})
+              <span className="text-gray-400 text-xs ml-1">- {param.description}</span>
             </label>
             {param.type === 'address' ? (
               <select
@@ -585,10 +425,10 @@ function getPlaceholderForType(type: string, paramName: string): string {
             ) : (
               <input
                 type={
-                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp' 
-                    ? 'number' 
-                    : param.type === 'float' 
-                      ? 'number' 
+                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp'
+                    ? 'number'
+                    : param.type === 'float'
+                      ? 'number'
                       : 'text'
                 }
                 value={parameterValues[param.name] || ''}
@@ -598,19 +438,19 @@ function getPlaceholderForType(type: string, paramName: string): string {
                 step={param.type === 'float' ? '0.1' : param.type === 'amount' || param.type === 'timestamp' ? '1' : undefined}
                 min={param.type === 'amount' || param.type === 'timestamp' ? '0' : undefined}
                 maxLength={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? 64 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? 64
                     : undefined
                 }
                 pattern={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? '[0-9a-fA-F]{64}' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? '[0-9a-fA-F]{64}'
                     : param.type === 'hex'
                       ? '[0-9a-fA-F]*'
                       : undefined
                 }
                 title={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
                     ? 'Enter exactly 64 hexadecimal characters (0-9, a-f, A-F)'
                     : param.type === 'hex'
                       ? 'Enter hexadecimal characters (0-9, a-f, A-F)'
@@ -625,18 +465,62 @@ function getPlaceholderForType(type: string, paramName: string): string {
           </div>
         ))}
 
-        <button
-          onClick={handleExecute}
-          disabled={isExecuting}
-          className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
-            isExecuting
+        {/* Run Tests Button - only show for test files */}
+        {activeFile?.type === 'test' && (
+          <button
+            onClick={onRunTests}
+            disabled={isRunningTests || isCompiling}
+            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${isRunningTests || isCompiling
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-purple-600 text-white hover:bg-purple-700'
+              }`}
+          >
+            {isRunningTests ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <TestTube size={16} />
+            )}
+            {isRunningTests ? 'Running Tests...' : 'Run Tests'}
+          </button>
+        )}
+
+        {/* Compile Button - only show for contract files */}
+        {activeFile?.type !== 'test' && (
+          <button
+            onClick={onCompile}
+            disabled={isCompiling || isExecuting || isRunningTests}
+            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${isCompiling || isExecuting || isRunningTests
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+          >
+            {isCompiling ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Zap size={16} />
+            )}
+            {isCompiling ? 'Compiling...' : 'Compile'}
+          </button>
+        )}
+
+        {/* Execute Method Button - only show for contract files when compiled */}
+        {activeFile?.type !== 'test' && (
+          <button
+            onClick={handleExecute}
+            disabled={isExecuting || isCompiling || isRunningTests}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${isExecuting || isCompiling || isRunningTests
               ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
               : 'bg-green-600 text-white hover:bg-green-700'
-          }`}
-        >
-          <Play size={16} />
-          {isExecuting ? 'Executing...' : `Execute ${selectedMethod}`}
-        </button>
+              }`}
+          >
+            {isExecuting ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Play size={16} />
+            )}
+            {isExecuting ? 'Executing...' : `Execute ${selectedMethod}`}
+          </button>
+        )}
       </div>
     </div>
   );
