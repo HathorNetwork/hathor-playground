@@ -639,7 +639,7 @@ try:
 
             execution_result = {
                 'success': True,
-                'result': result_value,
+                'result': _make_json_serializable(result_value),
                 'output': f'Method {method_name} executed successfully using real Runner (${methodType})'
             }
 

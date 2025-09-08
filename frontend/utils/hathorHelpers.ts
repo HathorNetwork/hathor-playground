@@ -24,7 +24,7 @@ def _create_address_from_hex(hex_str):
         raise ValueError(f"Invalid address length: {len(hex_str)} chars")
 
 def _convert_frontend_args(args_json, kwargs_json):
-    """Convert JSON strings from frontend to Python objects"""
+    """Convert JSON strings from frontend to Python objects with proper type conversion"""
     import json
     
     # Parse JSON strings
@@ -34,7 +34,44 @@ def _convert_frontend_args(args_json, kwargs_json):
     print(f"Converted args from frontend: {args}")
     print(f"Converted kwargs from frontend: {kwargs}")
     
-    return args, kwargs
+    # Convert hex string arguments to bytes objects for Hathor types
+    converted_args = []
+    for arg in args:
+        if isinstance(arg, str) and len(arg) == 64 and all(c in '0123456789abcdefABCDEF' for c in arg):
+            # This looks like a hex string for TokenUid, ContractId, etc. - convert to bytes
+            converted_args.append(bytes.fromhex(arg))
+            print(f"Converted hex string {arg[:16]}... to bytes")
+        else:
+            converted_args.append(arg)
+    
+    # Convert hex strings in kwargs as well
+    converted_kwargs = {}
+    for key, value in kwargs.items():
+        if isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdefABCDEF' for c in value):
+            # This looks like a hex string for TokenUid, ContractId, etc. - convert to bytes
+            converted_kwargs[key] = bytes.fromhex(value)
+            print(f"Converted hex string kwarg {key}: {value[:16]}... to bytes")
+        else:
+            converted_kwargs[key] = value
+    
+    return converted_args, converted_kwargs
+
+def _make_json_serializable(obj):
+    """Convert objects to JSON serializable format, handling bytes and Hathor types"""
+    if isinstance(obj, bytes):
+        return obj.hex()
+    elif isinstance(obj, dict):
+        return {key: _make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(item) for item in obj]
+    elif hasattr(obj, 'hex') and callable(getattr(obj, 'hex')):
+        # Handle Hathor types that have .hex() method (TokenUid, VertexId, etc.)
+        return obj.hex()
+    elif hasattr(obj, '__dict__'):
+        # Handle objects with attributes
+        return {key: _make_json_serializable(value) for key, value in obj.__dict__.items()}
+    else:
+        return obj
 
 def _create_context(
     caller_address_hex=None,
@@ -64,9 +101,12 @@ def _create_context(
         # Create minimal vertex for VertexData.create_from_vertex()
         from hathor.transaction import Transaction
         
+        # Generate a proper 32-byte hash for the transaction
+        vertex_hash = _gen_random_bytes(32)
+        
         # Create a minimal transaction as vertex
         minimal_vertex = Transaction(
-            hash=b'\\\\x00' * 32,
+            hash=vertex_hash,
             timestamp=timestamp or int(__import__('time').time()),
             version=1,
             weight=1.0,
@@ -78,7 +118,7 @@ def _create_context(
     
     # Create block_data following the unittest pattern
     block_data = BlockData(
-        hash=VertexId(b'\\\\x00' * 32),  # Empty hash like in unittest
+        hash=VertexId(_gen_random_bytes(32)),  # Generate proper 32-byte hash
         timestamp=timestamp or int(__import__('time').time()),
         height=0
     )
