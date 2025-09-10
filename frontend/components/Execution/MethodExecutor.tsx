@@ -246,7 +246,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
 
   if (!blueprintId && activeFile?.type !== 'test') {
     return (
-      <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
+      <div className="h-full p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
           <Settings className="mx-auto mb-2" size={20} />
           <p className="text-sm">Compile a contract first to execute methods</p>
@@ -257,7 +257,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
 
   if (methodDefinitions.length === 0 && activeFile?.type !== 'test') {
     return (
-      <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
+      <div className="h-full p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
           <Settings className="mx-auto mb-2" size={20} />
           <p className="text-sm">No methods found in contract</p>
@@ -268,7 +268,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
   }
 
   return (
-    <div className="h-full bg-gray-800 border-r border-gray-700 p-4 overflow-y-auto">
+    <div className="h-full p-4 overflow-y-auto">
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-lg font-semibold text-white">Contract Methods</h3>
