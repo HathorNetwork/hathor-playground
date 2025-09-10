@@ -22,7 +22,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
 
   // Get current file content to parse methods
   const activeFile = files.find((f: File) => f.id === activeFileId);
-  
+
   // Parse methods from current file
   const methodDefinitions = useMemo(() => {
     if (!activeFile?.content) return [];
@@ -107,7 +107,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
 
     // For initialize, use blueprint ID. For other methods, use contract ID
     const targetId = selectedMethod === 'initialize' ? blueprintId : contractId;
-    
+
     if (selectedMethod !== 'initialize' && !contractId) {
       addConsoleMessage('error', 'Please initialize the contract first before calling other methods.');
       return;
@@ -119,7 +119,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
     try {
       // Get current method definition
       const currentMethod = methodDefinitions.find(m => m.name === selectedMethod);
-      
+
       // Prepare arguments from parameter values
       let args: any[] = [];
       if (currentMethod?.parameters && currentMethod.parameters.length > 0) {
@@ -196,11 +196,11 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
 
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
-        
+
         // If this was initialize, capture the contract ID and store in global state
         if (selectedMethod === 'initialize' && result.result && typeof result.result === 'object' && 'contract_id' in result.result) {
           const newContractId = (result.result as any).contract_id;
-          
+
           // Create contract instance and store it in the global state
           const newInstance: ContractInstance = {
             blueprintId: blueprintId!,
@@ -208,7 +208,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
             contractName: activeFile?.name.replace('.py', '') || 'Unknown',
             timestamp: new Date()
           };
-          
+
           addContractInstance(newInstance);
           addConsoleMessage('info', `Contract created with ID: ${newContractId}`);
         } else if (result.result !== undefined && result.result !== null) {
@@ -220,7 +220,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
         // Show detailed error message
         const errorMessage = result.error || 'Unknown error occurred';
         addConsoleMessage('error', `❌ Method execution failed:`);
-        
+
         // Parse and display error details
         if (errorMessage.includes('AttributeError')) {
           addConsoleMessage('error', `  → ${errorMessage}`);
@@ -269,16 +269,8 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
 
   return (
     <div className="h-full p-4 overflow-y-auto">
+      <h3 className="text-lg font-semibold text-white mb-4">Deploy & Run</h3>
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-lg font-semibold text-white">Contract Methods</h3>
-          <button
-            onClick={handleGeneratePrompt}
-            className="px-2 py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded"
-          >
-            Generate Prompt
-          </button>
-        </div>
         {contractInstance && (
           <div className="bg-green-900/30 border border-green-700 rounded p-2 text-sm">
             <span className="text-green-400">✅ Contract Initialized</span>
@@ -289,7 +281,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
             </div>
           </div>
         )}
-        
+
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Caller Address:
@@ -425,10 +417,10 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
             ) : (
               <input
                 type={
-                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp' 
-                    ? 'number' 
-                    : param.type === 'float' 
-                      ? 'number' 
+                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp'
+                    ? 'number'
+                    : param.type === 'float'
+                      ? 'number'
                       : 'text'
                 }
                 value={parameterValues[param.name] || ''}
@@ -438,19 +430,19 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
                 step={param.type === 'float' ? '0.1' : param.type === 'amount' || param.type === 'timestamp' ? '1' : undefined}
                 min={param.type === 'amount' || param.type === 'timestamp' ? '0' : undefined}
                 maxLength={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? 64 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? 64
                     : undefined
                 }
                 pattern={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? '[0-9a-fA-F]{64}' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? '[0-9a-fA-F]{64}'
                     : param.type === 'hex'
                       ? '[0-9a-fA-F]*'
                       : undefined
                 }
                 title={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
                     ? 'Enter exactly 64 hexadecimal characters (0-9, a-f, A-F)'
                     : param.type === 'hex'
                       ? 'Enter hexadecimal characters (0-9, a-f, A-F)'

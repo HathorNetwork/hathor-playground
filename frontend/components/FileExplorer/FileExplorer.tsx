@@ -62,8 +62,9 @@ __blueprint__ = ${cleanName}`
 
   return (
     <div className="h-full bg-gray-900 text-gray-100 p-4">
+      <h3 className="text-lg font-semibold text-white mb-4">File Explorer</h3>
       {/* Contracts Section */}
-      <div className="mb-4">
+      <div>
         <div className="flex items-center justify-between mb-2">
           <button
             onClick={() => setIsContractsExpanded(!isContractsExpanded)}
@@ -136,7 +137,7 @@ __blueprint__ = ${cleanName}`
       </div>
 
       {/* Tests Section */}
-      <div className="mb-4">
+      <div>
         <div className="flex items-center justify-between mb-2">
           <button
             onClick={() => setIsTestsExpanded(!isTestsExpanded)}

@@ -26,7 +26,7 @@ const TestsView: React.FC<{ onRunTests: () => void }> = ({ onRunTests }) => {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-semibold mb-4">Tests</h2>
+      <h3 className="text-lg font-semibold text-white mb-4">Tests</h3>
       <div className="space-y-4">
         <div>
           <label htmlFor="test-file-select" className="block text-sm font-medium text-gray-300 mb-1">
