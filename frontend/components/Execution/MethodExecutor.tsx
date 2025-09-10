@@ -16,7 +16,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-  const { addConsoleMessage, files, getContractInstance, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
+  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
 
   const contractFiles = files.filter((f) => f.type === 'contract');
 
@@ -37,7 +37,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
   }, [activeFile?.content]);
 
   // Get contract instance from store (persisted across address changes)
-  const contractInstance = activeFile ? getContractInstance(activeFile.id) : null;
+  const contractInstance = activeFile ? contractInstances[activeFile.id] : null;
   const contractId = contractInstance?.contractId;
 
   // Reset method selection when switching files and set default method
@@ -122,7 +122,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
         blueprintIdToUse = compileResult.blueprint_id;
         contractIdToUse = compileResult.blueprint_id; // For initialize, contractId is the blueprintId
       } else {
-        const instance = getContractInstance(activeFile.id);
+        const instance = contractInstances[activeFile.id];
         if (!instance) {
           addConsoleMessage('error', 'Please initialize the contract first.');
           setIsExecuting(false);

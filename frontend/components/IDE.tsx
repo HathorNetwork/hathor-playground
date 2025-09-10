@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelHandle } from 'react-resizable-panels';
+import { EditorTabs } from './Editor/EditorTabs';
 import { CodeEditor } from './Editor/CodeEditor';
 import { Console } from './Console/Console';
 import { Toolbar } from './Toolbar/Toolbar';
@@ -233,6 +234,7 @@ export function IDE() {
           <Panel ref={codePanelRef} defaultSize={45}>
             <PanelGroup direction="vertical">
               <Panel defaultSize={70}>
+                <EditorTabs />
                 <CodeEditor />
               </Panel>
               <PanelResizeHandle className="h-1 bg-gray-800 hover:bg-blue-600 transition-colors" />

@@ -29,6 +29,7 @@ export interface ContractInstance {
 interface IDEState {
   // Files
   files: File[];
+  openFileIds: string[];
   activeFileId: string | null;
 
   // Console
@@ -54,6 +55,9 @@ interface IDEState {
   updateFile: (id: string, content: string) => void;
   deleteFile: (id: string) => void;
   setActiveFile: (id: string) => void;
+  openFile: (fileId: string) => void;
+  closeFile: (fileId: string) => void;
+  reorderFiles: (fromIndex: number, toIndex: number) => void;
 
   addConsoleMessage: (type: ConsoleMessage['type'], message: string) => void;
   clearConsole: () => void;
@@ -144,8 +148,7 @@ from hathor.nanocontracts.types import public, view, TokenUid, VertexId, Amount
 
 
 class LiquidityPool(Blueprint):
-    """
-    A simple liquidity pool contract for two tokens
+    """A simple liquidity pool contract for two tokens
     Demonstrates proper use of Hathor Blueprint SDK types
     """
     
@@ -298,6 +301,7 @@ class CounterTestCase(BlueprintTestCase):
       type: 'test',
     },
   ],
+  openFileIds: ['1'],
   activeFileId: '1',
 
   consoleMessages: [],
@@ -317,6 +321,7 @@ class CounterTestCase(BlueprintTestCase):
   addFile: (file) => {
     set((state) => ({
       files: [...state.files, file],
+      openFileIds: [...state.openFileIds, file.id],
       activeFileId: file.id,
     }));
     // Auto-persist to storage
@@ -343,13 +348,19 @@ class CounterTestCase(BlueprintTestCase):
   },
 
   deleteFile: (id) => {
-    set((state) => ({
-      files: state.files.filter((f) => f.id !== id),
-      activeFileId:
-        state.activeFileId === id
-          ? state.files[0]?.id || null
-          : state.activeFileId,
-    }));
+    set((state) => {
+      const newOpenFileIds = state.openFileIds.filter((fileId) => fileId !== id);
+      let newActiveFileId = state.activeFileId;
+      if (state.activeFileId === id) {
+        const closingTabIndex = state.openFileIds.indexOf(id);
+        newActiveFileId = newOpenFileIds[closingTabIndex] || newOpenFileIds[newOpenFileIds.length - 1] || null;
+      }
+      return {
+        files: state.files.filter((f) => f.id !== id),
+        openFileIds: newOpenFileIds,
+        activeFileId: newActiveFileId,
+      };
+    });
     // Delete from storage
     const state = get();
     if (state.isStorageInitialized) {
@@ -358,14 +369,48 @@ class CounterTestCase(BlueprintTestCase):
   },
 
   setActiveFile: (id) => {
-    set(() => ({
-      activeFileId: id,
-    }));
+    set({ activeFileId: id });
     // Save active file preference
     const state = get();
     if (state.isStorageInitialized) {
       storage.setPreference('lastActiveFileId', id).catch(console.error);
     }
+  },
+
+  openFile: (fileId) => {
+    set((state) => {
+      if (!state.openFileIds.includes(fileId)) {
+        return {
+          openFileIds: [...state.openFileIds, fileId],
+          activeFileId: fileId,
+        };
+      }
+      return { activeFileId: fileId };
+    });
+  },
+
+  closeFile: (fileId) => {
+    set((state) => {
+      const newOpenFileIds = state.openFileIds.filter((id) => id !== fileId);
+      let newActiveFileId = state.activeFileId;
+      if (state.activeFileId === fileId) {
+        const closingTabIndex = state.openFileIds.indexOf(fileId);
+        newActiveFileId = newOpenFileIds[closingTabIndex] || newOpenFileIds[newOpenFileIds.length - 1] || null;
+      }
+      return {
+        openFileIds: newOpenFileIds,
+        activeFileId: newActiveFileId,
+      };
+    });
+  },
+
+  reorderFiles: (fromIndex, toIndex) => {
+    set((state) => {
+      const newOpenFileIds = [...state.openFileIds];
+      const [movedItem] = newOpenFileIds.splice(fromIndex, 1);
+      newOpenFileIds.splice(toIndex, 0, movedItem);
+      return { openFileIds: newOpenFileIds };
+    });
   },
 
   addConsoleMessage: (type, message) =>
@@ -545,6 +590,7 @@ class CounterTestCase(BlueprintTestCase):
         set({
           files,
           activeFileId: validActiveFileId,
+          openFileIds: [validActiveFileId]
         });
 
         console.log(`Loaded ${files.length} files from storage`);
