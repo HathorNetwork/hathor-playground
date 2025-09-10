@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Settings } from 'lucide-react';
+import { Play, Settings, Zap, TestTube, Loader2 } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
@@ -9,14 +9,16 @@ import { generateFrontendPrompt } from '@/utils/promptGenerator';
 
 interface MethodExecutorProps {
   blueprintId?: string;
+  onCompile: () => void;
+  onRunTests: () => void;
 }
 
-export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) => {
+export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onCompile, onRunTests }) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
-  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance } = useIDEStore();
+  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
 
   // Get current file content to parse methods
   const activeFile = files.find((f: File) => f.id === activeFileId);
@@ -242,7 +244,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     }
   };
 
-  if (!blueprintId) {
+  if (!blueprintId && activeFile?.type !== 'test') {
     return (
       <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
@@ -253,7 +255,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
     );
   }
 
-  if (methodDefinitions.length === 0) {
+  if (methodDefinitions.length === 0 && activeFile?.type !== 'test') {
     return (
       <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
@@ -463,18 +465,65 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId }) =
           </div>
         ))}
 
-        <button
-          onClick={handleExecute}
-          disabled={isExecuting}
-          className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
-            isExecuting
-              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-              : 'bg-green-600 text-white hover:bg-green-700'
-          }`}
-        >
-          <Play size={16} />
-          {isExecuting ? 'Executing...' : `Execute ${selectedMethod}`}
-        </button>
+        {/* Run Tests Button - only show for test files */}
+        {activeFile?.type === 'test' && (
+          <button
+            onClick={onRunTests}
+            disabled={isRunningTests || isCompiling}
+            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${
+              isRunningTests || isCompiling
+                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                : 'bg-purple-600 text-white hover:bg-purple-700'
+            }`}
+          >
+            {isRunningTests ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <TestTube size={16} />
+            )}
+            {isRunningTests ? 'Running Tests...' : 'Run Tests'}
+          </button>
+        )}
+
+        {/* Compile Button - only show for contract files */}
+        {activeFile?.type !== 'test' && (
+          <button
+            onClick={onCompile}
+            disabled={isCompiling || isExecuting || isRunningTests}
+            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${
+              isCompiling || isExecuting || isRunningTests
+                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {isCompiling ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Zap size={16} />
+            )}
+            {isCompiling ? 'Compiling...' : 'Compile'}
+          </button>
+        )}
+
+        {/* Execute Method Button - only show for contract files when compiled */}
+        {activeFile?.type !== 'test' && (
+          <button
+            onClick={handleExecute}
+            disabled={isExecuting || isCompiling || isRunningTests}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
+              isExecuting || isCompiling || isRunningTests
+                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                : 'bg-green-600 text-white hover:bg-green-700'
+            }`}
+          >
+            {isExecuting ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Play size={16} />
+            )}
+            {isExecuting ? 'Executing...' : `Execute ${selectedMethod}`}
+          </button>
+        )}
       </div>
     </div>
   );
