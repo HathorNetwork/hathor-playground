@@ -8,8 +8,6 @@ import { useIDEStore, File } from '@/store/ide-store';
 
 interface LeftSidebarContentProps {
   activeTab: 'files' | 'run' | 'tests';
-  blueprintId: string | undefined;
-  onCompile: () => void;
   onRunTests: () => void;
 }
 
@@ -57,12 +55,12 @@ const TestsView: React.FC<{ onRunTests: () => void }> = ({ onRunTests }) => {
   );
 };
 
-export const LeftSidebarContent: React.FC<LeftSidebarContentProps> = ({ activeTab, blueprintId, onCompile, onRunTests }) => {
+export const LeftSidebarContent: React.FC<LeftSidebarContentProps> = ({ activeTab, onRunTests }) => {
   switch (activeTab) {
     case 'files':
       return <FileExplorer />;
     case 'run':
-      return <MethodExecutor blueprintId={blueprintId} onCompile={onCompile} onRunTests={() => {}} />;
+      return <MethodExecutor onRunTests={() => {}} />;
     case 'tests':
       return <TestsView onRunTests={onRunTests} />;
     default:

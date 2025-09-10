@@ -37,7 +37,7 @@ interface IDEState {
 
   // Contracts
   compiledContracts: Contract[];
-  contractInstances: ContractInstance[]; // Track initialized contract instances
+  contractInstances: Record<string, ContractInstance>; // Track initialized contract instances by file ID
 
   // Chat Sessions
   chatSessions: ChatSession[];
@@ -59,8 +59,8 @@ interface IDEState {
   clearConsole: () => void;
 
   addCompiledContract: (contract: Contract) => void;
-  addContractInstance: (instance: ContractInstance) => void;
-  getContractInstance: (blueprintId: string) => ContractInstance | null;
+  addContractInstance: (fileId: string, instance: ContractInstance) => void;
+  getContractInstance: (fileId: string) => ContractInstance | null;
   clearContractInstances: () => void;
 
   setIsCompiling: (value: boolean) => void;
@@ -303,7 +303,7 @@ class CounterTestCase(BlueprintTestCase):
   consoleMessages: [],
   messageIdCounter: 0,
   compiledContracts: [],
-  contractInstances: [],
+  contractInstances: {},
 
   chatSessions: [],
   activeChatSessionId: null,
@@ -393,19 +393,22 @@ class CounterTestCase(BlueprintTestCase):
       compiledContracts: [...state.compiledContracts, contract],
     })),
 
-  addContractInstance: (instance) =>
+  addContractInstance: (fileId: string, instance: ContractInstance) =>
     set((state) => ({
-      contractInstances: [...state.contractInstances.filter(c => c.blueprintId !== instance.blueprintId), instance],
+      contractInstances: {
+        ...state.contractInstances,
+        [fileId]: instance,
+      },
     })),
 
-  getContractInstance: (blueprintId) => {
+  getContractInstance: (fileId: string) => {
     const state = get();
-    return state.contractInstances.find(instance => instance.blueprintId === blueprintId) || null;
+    return state.contractInstances[fileId] || null;
   },
 
   clearContractInstances: () =>
     set(() => ({
-      contractInstances: [],
+      contractInstances: {},
     })),
 
   setIsCompiling: (value) =>

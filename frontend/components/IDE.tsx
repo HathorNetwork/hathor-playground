@@ -14,7 +14,7 @@ import { Files, Play, Beaker } from 'lucide-react';
 import { clsx } from 'clsx';
 
 export function IDE() {
-  const [currentBlueprintId, setCurrentBlueprintId] = React.useState<string | undefined>();
+  
   const [isAICollapsed, setIsAICollapsed] = React.useState(true);
   const [isPyodideReady, setIsPyodideReady] = React.useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = React.useState(false);
@@ -67,73 +67,7 @@ export function IDE() {
 
   const activeFile = files.find((f: File) => f.id === activeFileId);
 
-  const handleCompile = async () => {
-    if (!activeFile) return;
-
-    setIsCompiling(true);
-    
-    clearContractInstances();
-    
-    addConsoleMessage('info', `Compiling ${activeFile.name}...`);
-
-    try {
-      const validationResult = await validationApi.validate({
-        code: activeFile.content,
-        strict: true,
-      });
-
-      validationResult.errors.forEach((error) => {
-        if (error.severity === 'error') {
-          addConsoleMessage('error', `Line ${error.line}: ${error.message}`);
-        } else {
-          addConsoleMessage('warning', `Line ${error.line}: ${error.message}`);
-        }
-      });
-
-      if (!validationResult.valid && validationResult.errors.some(e => e.severity === 'error')) {
-        addConsoleMessage('error', 'Compilation failed due to validation errors');
-        return;
-      }
-
-      console.log('Compiling contract:', activeFile.name);
-      
-      const result = await contractsApi.compile({
-        code: activeFile.content,
-        blueprint_name: activeFile.name.replace('.py', ''),
-      });
-
-      if (result.success) {
-        addConsoleMessage('success', `✅ Successfully compiled ${activeFile.name}`);
-        if (result.blueprint_id) {
-          addConsoleMessage('info', `Blueprint ID: ${result.blueprint_id}`);
-        }
-
-        if (result.blueprint_id) {
-          setCurrentBlueprintId(result.blueprint_id);
-          addCompiledContract({
-            contract_id: result.blueprint_id,
-            blueprint_id: result.blueprint_id,
-            code: activeFile.content,
-            methods: [],
-            created_at: new Date().toISOString(),
-          });
-        }
-      } else {
-        addConsoleMessage('error', 'Compilation failed');
-        result.errors.forEach((error) => {
-          addConsoleMessage('error', error);
-        });
-      }
-
-      result.warnings.forEach((warning) => {
-        addConsoleMessage('warning', warning);
-      });
-    } catch (error: any) {
-      addConsoleMessage('error', `Compilation error: ${error.message || error}`);
-    } finally {
-      setIsCompiling(false);
-    }
-  };
+  
 
   const handleExecute = async () => {
     if (!activeFile) return;
@@ -292,8 +226,6 @@ export function IDE() {
           <Panel ref={leftSidebarPanelRef} collapsible={true} defaultSize={30} minSize={5} maxSize={40}>
             <LeftSidebarContent
               activeTab={activeTab}
-              blueprintId={currentBlueprintId}
-              onCompile={handleCompile}
               onRunTests={handleRunTests}
             />
           </Panel>
