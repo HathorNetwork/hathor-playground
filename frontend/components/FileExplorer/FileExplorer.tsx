@@ -6,7 +6,7 @@ import { useIDEStore, File } from '@/store/ide-store';
 import { clsx } from 'clsx';
 
 export const FileExplorer: React.FC = () => {
-  const { files, activeFileId, setActiveFile, addFile, deleteFile } = useIDEStore();
+  const { files, activeFileId, openFile, addFile, deleteFile } = useIDEStore();
   const [isContractsExpanded, setIsContractsExpanded] = useState(true);
   const [isTestsExpanded, setIsTestsExpanded] = useState(true);
   const [showNewFileInput, setShowNewFileInput] = useState<'contracts' | 'tests' | null>(null);
@@ -62,8 +62,9 @@ __blueprint__ = ${cleanName}`
 
   return (
     <div className="h-full bg-gray-900 text-gray-100 p-4">
+      <h3 className="text-lg font-semibold text-white mb-4">File Explorer</h3>
       {/* Contracts Section */}
-      <div className="mb-4">
+      <div>
         <div className="flex items-center justify-between mb-2">
           <button
             onClick={() => setIsContractsExpanded(!isContractsExpanded)}
@@ -108,7 +109,7 @@ __blueprint__ = ${cleanName}`
             {contractFiles.map((file: File) => (
               <div
                 key={file.id}
-                onClick={() => setActiveFile(file.id)}
+                onClick={() => openFile(file.id)}
                 className={clsx(
                   'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
                   activeFileId === file.id
@@ -136,7 +137,7 @@ __blueprint__ = ${cleanName}`
       </div>
 
       {/* Tests Section */}
-      <div className="mb-4">
+      <div className="mt-4">
         <div className="flex items-center justify-between mb-2">
           <button
             onClick={() => setIsTestsExpanded(!isTestsExpanded)}
@@ -181,7 +182,7 @@ __blueprint__ = ${cleanName}`
             {testFiles.map((file: File) => (
               <div
                 key={file.id}
-                onClick={() => setActiveFile(file.id)}
+                onClick={() => openFile(file.id)}
                 className={clsx(
                   'flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group',
                   activeFileId === file.id
