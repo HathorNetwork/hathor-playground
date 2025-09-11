@@ -62,6 +62,21 @@ def _create_actions(actions_json):
 
     return actions_list
 
+def _create_actions(actions_json):
+    actions_list = []
+    if actions_json:
+        import json
+        from hathor.nanocontracts.types import NCDepositAction, NCWithdrawalAction, TokenUid
+        for action_data in json.loads(actions_json):
+            token_uid = TokenUid(bytes.fromhex(action_data['tokenId']))
+            amount = int(action_data['amount'])
+            if action_data['type'] == 'deposit':
+                actions_list.append(NCDepositAction(token_uid=token_uid, amount=amount))
+            elif action_data['type'] == 'withdrawal':
+                actions_list.append(NCWithdrawalAction(token_uid=token_uid, amount=amount))
+
+    return actions_list
+
 def _create_context(
     caller_address_hex=None,
     actions=None,
