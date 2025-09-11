@@ -53,6 +53,7 @@ export interface ExecuteRequest {
   caller_address?: string;
   method_type?: 'public' | 'view';
   code?: string; // Contract code for method type detection
+  actions?: any[];
 }
 
 export interface ExecuteResponse {
@@ -115,7 +116,8 @@ export const contractsApi = {
         kwargs: request.kwargs || {},
         caller_address: request.caller_address || 'a1b2c3d4e5f6789012345678901234567890abcdef12345678',
         method_type: request.method_type,
-        code: request.code
+        code: request.code,
+        actions: request.actions
       });
 
       return {

@@ -540,14 +540,14 @@ json.dumps(result)
     }
   }
 
-  async executeContract(request: ExecutionRequest): Promise<ExecutionResult> {
+  async executeContract(request: any): Promise<ExecutionResult> {
     if (!this.pyodide) {
       await this.initialize();
       if (!this.pyodide) throw new Error('Failed to initialize Pyodide');
     }
 
     try {
-      const { method_name, args, caller_address, code } = request;
+      const { method_name, args, caller_address, code, actions } = request;
       let { contract_id } = request;
 
       // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)
@@ -581,7 +581,8 @@ try:
         print("🚀 Using real Runner for execution")
 
         # Create context
-        context = _create_context(caller_address_hex='${caller_address}')
+        actions_list = _create_actions('''${JSON.stringify(actions || [])}''')
+        context = _create_context(caller_address_hex='${caller_address}', actions=actions_list)
 
         # Convert arguments and kwargs from JSON to Python objects
         args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(request.kwargs)}''')
