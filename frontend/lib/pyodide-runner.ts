@@ -558,19 +558,12 @@ json.dumps(result)
         contract_id = this.generateId();
         // blueprint_id stays as the original contract_id (which was blueprint_id)
       }
-      // Determine method type by parsing the contract code
-      let methodType: 'public' | 'view' | null = null;
+
       if (!code) {
         return { success: false, error: 'Contract code is required for method execution' };
       }
-
-      methodType = this.getMethodType(code, method_name);
-      if (!methodType) {
-        return {
-          success: false,
-          error: `Method '${method_name}' is not decorated with @public or @view`
-        };
-      }
+      // Determine method type by parsing the contract code
+      const methodType = this.getMethodType(code, method_name)
 
       // Execute the method using real Runner
       const result = this.pyodide.runPython(`
@@ -616,7 +609,7 @@ try:
 
         else:
             # Execute method on existing contract
-            print(f"⚡ Executing method {method_name} with args {args} kwargs {kwargs}, type ${methodType}")
+            print(f"⚡ Executing method {method_name} with args {args} kwargs {kwargs}, type {method_type}")
 
             if method_type == 'public':
                 # Use call_public_method for @public methods
@@ -641,7 +634,7 @@ try:
             execution_result = {
                 'success': True,
                 'result': result_value,
-                'output': f'Method {method_name} executed successfully using real Runner (${methodType})'
+                'output': f'Method {method_name} executed successfully using real Runner ({method_type})'
             }
 
     else:
@@ -747,12 +740,12 @@ json.dumps(validation_result)
       const line = lines[i].trim();
 
       // Look for @public or @view decorators
-      if (line === '@public' || line === '@view') {
+      if (line.startsWith('@public') || line.startsWith('@view')) {
         // Check the next few lines for the method definition
         for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
           const nextLine = lines[j].trim();
           if (nextLine.startsWith(`def ${methodName}(`)) {
-            return line === '@public' ? 'public' : 'view';
+            return line.startsWith('@public') ? 'public' : 'view';
           }
           // Skip empty lines and other decorators
           if (nextLine && !nextLine.startsWith('@') && !nextLine.startsWith('def')) {

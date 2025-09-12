@@ -27,14 +27,25 @@ def _convert_frontend_args(args_json, kwargs_json):
     """Convert JSON strings from frontend to Python objects"""
     import json
 
+    def parse_arg(arg):
+        # TODO need a better way to parse arguments to correct types
+        if arg == '00':
+            return bytes.fromhex("00")
+        if isinstance(arg, str) and len(arg) == 64:
+            # 64 char strings are usually token uids, contract ids, blueprint ids, etc
+            return bytes.fromhex(arg)
+        return arg
+
     # Parse JSON strings
     args = json.loads(args_json) if args_json else []
     kwargs = json.loads(kwargs_json) if kwargs_json else {}
 
-    print(f"Converted args from frontend: {args}")
-    print(f"Converted kwargs from frontend: {kwargs}")
+    parsed_args = [parse_arg(arg) for arg in args]
+    parsed_kwargs = {k: parse_args(v) for k, v in kwargs.items()}
+    print(f"Converted args from frontend: {parsed_args}")
+    print(f"Converted kwargs from frontend: {parsed_kwargs}")
 
-    return args, kwargs
+    return parsed_args, parsed_kwargs
 
 def _create_actions(actions_json):
     actions_list = []
