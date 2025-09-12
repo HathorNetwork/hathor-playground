@@ -643,11 +643,10 @@ try:
 except Exception as e:
     import traceback
     traceback_str = traceback.format_exc()
-    print(f"❌ Method execution exception: {e}")
-    print(f"❌ Full execution traceback: {traceback_str}")
+    print(f"❌ Method execution traceback: {traceback_str}")
     execution_result = {
         'success': False,
-        'error': str(e),
+        'error': e.__class__.__name__,
         'traceback': traceback_str
     }
 
@@ -725,9 +724,11 @@ json.dumps(validation_result)
   }
 
   private generateId(): string {
-    return Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(32)))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
+    // make sure ids start with 0000...
+    return '0000' + id.slice(4);
   }
 
   /**
