@@ -7,7 +7,7 @@ import { useIDEStore, File } from '@/store/ide-store';
 export const CodeEditor: React.FC = () => {
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
-  
+
   const { files, activeFileId, updateFile } = useIDEStore();
   const activeFile = files.find((f: File) => f.id === activeFileId);
 
@@ -21,7 +21,7 @@ export const CodeEditor: React.FC = () => {
           'import', 'from', 'as', 'try', 'except', 'raise', 'pass',
           'True', 'False', 'None', 'self', 'int', 'str', 'bool', 'float',
         ],
-        
+
         tokenizer: {
           root: [
             [/@(public|view|fallback)/, 'decorator'],
@@ -37,13 +37,13 @@ export const CodeEditor: React.FC = () => {
             [/'/, 'string', '@stringSingle'],
             [/#.*$/, 'comment'],
           ],
-          
+
           string: [
             [/[^\\"]+/, 'string'],
             [/\\./, 'string.escape'],
             [/"/, 'string', '@pop']
           ],
-          
+
           stringSingle: [
             [/[^\\']+/, 'string'],
             [/\\./, 'string.escape'],
@@ -57,7 +57,7 @@ export const CodeEditor: React.FC = () => {
   const handleEditorDidMount = (editor: any, monaco: Monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
-    
+
     // Configure Python language features
     monaco.languages.registerCompletionItemProvider('python', {
       provideCompletionItems: (model, position) => {
@@ -101,7 +101,7 @@ export const CodeEditor: React.FC = () => {
             range
           },
         ];
-        
+
         return { suggestions };
       },
     });
@@ -143,7 +143,7 @@ export const CodeEditor: React.FC = () => {
           renderWhitespace: 'selection',
           padding: {
             top: 8,
-            bottom: 8,
+            bottom: 64,
           },
           bracketPairColorization: {
             enabled: true,

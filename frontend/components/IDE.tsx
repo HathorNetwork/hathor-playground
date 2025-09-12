@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelHandle } from 'react-resizable-panels';
-import { EditorTabs } from './Editor/EditorTabs';
 import { CodeEditor } from './Editor/CodeEditor';
 import { Console } from './Console/Console';
 import { Toolbar } from './Toolbar/Toolbar';
@@ -13,6 +12,9 @@ import { contractsApi, validationApi } from '@/lib/api';
 import { LeftSidebarContent } from './LeftSidebar/LeftSidebarContent';
 import { Files, Play, Beaker } from 'lucide-react';
 import { clsx } from 'clsx';
+import dynamic from 'next/dynamic';
+
+const EditorTabs = dynamic(() => import('./Editor/EditorTabs').then(mod => mod.EditorTabs), { ssr: false });
 
 export function IDE() {
   

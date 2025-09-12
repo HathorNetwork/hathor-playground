@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Settings, TestTube, Loader2 } from 'lucide-react';
+import { Play, Settings, TestTube, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
@@ -10,12 +10,20 @@ interface MethodExecutorProps {
   onRunTests: () => void;
 }
 
+interface Action {
+  id: string;
+  type: 'deposit' | 'withdrawal';
+  tokenId: string;
+  amount: string;
+}
+
 export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [actions, setActions] = useState<Action[]>([]);
   const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
 
   const contractFiles = files.filter((f) => f.type === 'contract');
@@ -48,9 +56,11 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
       const defaultMethod = initMethod ? initMethod.name : methodDefinitions[0].name;
       setSelectedMethod(defaultMethod);
       setParameterValues({}); // Clear parameter values when switching contracts
+      setActions([]);
     } else {
       setSelectedMethod('');
       setParameterValues({});
+      setActions([]);
     }
   }, [methodDefinitions, selectedFileId]);
 
@@ -58,10 +68,23 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
   const handleMethodChange = (method: string) => {
     setSelectedMethod(method);
     setParameterValues({}); // Clear parameter values when switching methods
+    setActions([]);
   };
 
   const updateParameterValue = (paramName: string, value: string) => {
     setParameterValues(prev => ({ ...prev, [paramName]: value }));
+  };
+
+  const addAction = (type: 'deposit' | 'withdrawal') => {
+    setActions(prev => [...prev, { id: Date.now().toString(), type, tokenId: 'htr', amount: '' }]);
+  };
+
+  const updateAction = (id: string, field: keyof Action, value: string) => {
+    setActions(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+
+  const removeAction = (id: string) => {
+    setActions(prev => prev.filter(a => a.id !== id));
   };
 
   // Predefined caller addresses for testing (25 bytes = 50 hex characters for Address)
@@ -197,10 +220,12 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
         caller_address: callerAddresses[selectedCaller as keyof typeof callerAddresses],
         method_type: currentMethod?.decorator,
         code: activeFile?.content,
+        actions: actions.map(a => ({ ...a, amount: Math.round(parseFloat(a.amount) * 100) }))
       });
 
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
+        setActions([]);
 
         if (selectedMethod === 'initialize' && result.result && typeof result.result === 'object' && 'contract_id' in result.result) {
           const newContractId = (result.result as any).contract_id;
@@ -459,6 +484,50 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
             )}
           </div>
         ))}
+
+        {/* Actions Section */}
+        <div className="space-y-2">
+          <h4 className="text-md font-semibold text-gray-300">Actions</h4>
+          {actions.map((action, index) => (
+            <div key={action.id} className="flex items-center gap-2 p-2 border border-gray-700 rounded">
+              <div className="flex-1 space-y-2">
+                <div className="text-sm font-medium text-gray-400 capitalize">{action.type}</div>
+                <select
+                  value={action.tokenId}
+                  onChange={(e) => updateAction(action.id, 'tokenId', e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
+                >
+                  {Object.entries(sampleValues.tokenuid).map(([name, uid]) => (
+                    <option key={name} value={uid}>
+                      {name.toUpperCase()} ({uid.slice(0, 8)}...)
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  value={action.amount}
+                  onChange={(e) => updateAction(action.id, 'amount', e.target.value)}
+                  placeholder="Amount"
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                  step="0.01"
+                  min="0"
+                  onWheel={(e) => e.currentTarget.blur()}
+                />
+              </div>
+              <button onClick={() => removeAction(action.id)} className="p-1 text-gray-400 hover:text-white">
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <button onClick={() => addAction('deposit')} className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300">
+              <Plus size={14} /> Add Deposit
+            </button>
+            <button onClick={() => addAction('withdrawal')} className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300">
+              <Plus size={14} /> Add Withdrawal
+            </button>
+          </div>
+        </div>
 
         {/* Execute Method Button */}
         {activeFile?.type !== 'test' && (

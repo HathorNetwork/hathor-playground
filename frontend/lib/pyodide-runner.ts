@@ -540,14 +540,14 @@ json.dumps(result)
     }
   }
 
-  async executeContract(request: ExecutionRequest): Promise<ExecutionResult> {
+  async executeContract(request: any): Promise<ExecutionResult> {
     if (!this.pyodide) {
       await this.initialize();
       if (!this.pyodide) throw new Error('Failed to initialize Pyodide');
     }
 
     try {
-      const { method_name, args, caller_address, code } = request;
+      const { method_name, args, caller_address, code, actions } = request;
       let { contract_id } = request;
 
       // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)
@@ -558,19 +558,12 @@ json.dumps(result)
         contract_id = this.generateId();
         // blueprint_id stays as the original contract_id (which was blueprint_id)
       }
-      // Determine method type by parsing the contract code
-      let methodType: 'public' | 'view' | null = null;
+
       if (!code) {
         return { success: false, error: 'Contract code is required for method execution' };
       }
-
-      methodType = this.getMethodType(code, method_name);
-      if (!methodType) {
-        return {
-          success: false,
-          error: `Method '${method_name}' is not decorated with @public or @view`
-        };
-      }
+      // Determine method type by parsing the contract code
+      const methodType = this.getMethodType(code, method_name)
 
       // Execute the method using real Runner
       const result = this.pyodide.runPython(`
@@ -581,7 +574,8 @@ try:
         print("🚀 Using real Runner for execution")
 
         # Create context
-        context = _create_context(caller_address_hex='${caller_address}')
+        actions_list = _create_actions('''${JSON.stringify(actions || [])}''')
+        context = _create_context(caller_address_hex='${caller_address}', actions=actions_list)
 
         # Convert arguments and kwargs from JSON to Python objects
         args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(request.kwargs)}''')
@@ -615,7 +609,7 @@ try:
 
         else:
             # Execute method on existing contract
-            print(f"⚡ Executing method {method_name} with args {args} kwargs {kwargs}, type ${methodType}")
+            print(f"⚡ Executing method {method_name} with args {args} kwargs {kwargs}, type {method_type}")
 
             if method_type == 'public':
                 # Use call_public_method for @public methods
@@ -640,7 +634,7 @@ try:
             execution_result = {
                 'success': True,
                 'result': result_value,
-                'output': f'Method {method_name} executed successfully using real Runner (${methodType})'
+                'output': f'Method {method_name} executed successfully using real Runner ({method_type})'
             }
 
     else:
@@ -649,11 +643,10 @@ try:
 except Exception as e:
     import traceback
     traceback_str = traceback.format_exc()
-    print(f"❌ Method execution exception: {e}")
-    print(f"❌ Full execution traceback: {traceback_str}")
+    print(f"❌ Method execution traceback: {traceback_str}")
     execution_result = {
         'success': False,
-        'error': str(e),
+        'error': e.__class__.__name__,
         'traceback': traceback_str
     }
 
@@ -731,9 +724,11 @@ json.dumps(validation_result)
   }
 
   private generateId(): string {
-    return Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(32)))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
+    // make sure ids start with 0000...
+    return '0000' + id.slice(4);
   }
 
   /**
@@ -746,12 +741,12 @@ json.dumps(validation_result)
       const line = lines[i].trim();
 
       // Look for @public or @view decorators
-      if (line === '@public' || line === '@view') {
+      if (line.startsWith('@public') || line.startsWith('@view')) {
         // Check the next few lines for the method definition
         for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
           const nextLine = lines[j].trim();
           if (nextLine.startsWith(`def ${methodName}(`)) {
-            return line === '@public' ? 'public' : 'view';
+            return line.startsWith('@public') ? 'public' : 'view';
           }
           // Skip empty lines and other decorators
           if (nextLine && !nextLine.startsWith('@') && !nextLine.startsWith('def')) {
