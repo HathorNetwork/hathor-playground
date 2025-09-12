@@ -56,9 +56,11 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
       const defaultMethod = initMethod ? initMethod.name : methodDefinitions[0].name;
       setSelectedMethod(defaultMethod);
       setParameterValues({}); // Clear parameter values when switching contracts
+      setActions([]);
     } else {
       setSelectedMethod('');
       setParameterValues({});
+      setActions([]);
     }
   }, [methodDefinitions, selectedFileId]);
 
@@ -66,6 +68,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
   const handleMethodChange = (method: string) => {
     setSelectedMethod(method);
     setParameterValues({}); // Clear parameter values when switching methods
+    setActions([]);
   };
 
   const updateParameterValue = (paramName: string, value: string) => {
@@ -73,7 +76,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
   };
 
   const addAction = (type: 'deposit' | 'withdrawal') => {
-    setActions(prev => [...prev, { id: Date.now().toString(), type, tokenId: 'htr', amount: '0' }]);
+    setActions(prev => [...prev, { id: Date.now().toString(), type, tokenId: 'htr', amount: '' }]);
   };
 
   const updateAction = (id: string, field: keyof Action, value: string) => {
@@ -222,6 +225,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
 
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
+        setActions([]);
 
         if (selectedMethod === 'initialize' && result.result && typeof result.result === 'object' && 'contract_id' in result.result) {
           const newContractId = (result.result as any).contract_id;
@@ -507,6 +511,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
                   step="0.01"
                   min="0"
+                  onWheel={(e) => e.currentTarget.blur()}
                 />
               </div>
               <button onClick={() => removeAction(action.id)} className="p-1 text-gray-400 hover:text-white">
