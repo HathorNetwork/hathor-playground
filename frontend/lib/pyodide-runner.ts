@@ -319,6 +319,9 @@ os.makedirs('${dirPath}', exist_ok=True)
   }
 
   private async setupPythonEnvironment(): Promise<void> {
+    // Load common helper functions from shared utilities
+    await this.pyodide.runPython(getHathorHelpers());
+
     // Set up Python environment with real Hathor modules
     await this.pyodide.runPython(`
 import sys
@@ -374,8 +377,6 @@ try:
         node_store = MemoryNodeTrieStore()
         trie = PatriciaTrie(node_store)
         block_storage = NCBlockStorage(trie)
-        # TODO ok to use dummy seed or should we use proper one?
-        seed = bytes(32)  # Dummy seed
 
         storage_factory = NCStorageFactory()
         nc_runner = Runner(
@@ -384,7 +385,7 @@ try:
             tx_storage=tx_storage,
             storage_factory=storage_factory,
             block_storage=block_storage,
-            seed=seed
+            seed=_gen_random_bytes(32)
         )
 
         # Make runner globally available for tests
@@ -410,9 +411,6 @@ except ImportError as e:
 
 print("✅ Real Hathor SDK environment loaded successfully")
 `);
-
-    // Load common helper functions from shared utilities
-    await this.pyodide.runPython(getHathorHelpers());
   }
 
   async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string }> {

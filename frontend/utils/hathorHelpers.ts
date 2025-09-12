@@ -94,7 +94,6 @@ def _create_context(
         caller_id = Address(caller_hash)
     else:
         # Generate random address if none provided (like gen_random_address())
-        import random
         random_hash = _gen_random_bytes(25)  # 25-byte address using our helper
         caller_id = Address(random_hash)
 
