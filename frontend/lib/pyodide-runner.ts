@@ -399,6 +399,8 @@ print("✅ Hathor SDK environment loaded successfully")
   }
 
   async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string }> {
+    // XXX Not really compiling, but will leave named like this so we don't
+    // need to change everything. We are basically deploying an on-chain blueprint.
     if (!this.pyodide) {
       await this.initialize();
       if (!this.pyodide) throw new Error('Failed to initialize Pyodide');
