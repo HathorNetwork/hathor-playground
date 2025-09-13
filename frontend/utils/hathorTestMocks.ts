@@ -35,18 +35,18 @@ class MockManager:
 # Use the real Runner that's already set up in pyodide-runner.ts
 def get_real_runner():
     """Get the real Runner instance that was created during pyodide setup"""
-    # The real nc_runner was created in setupPythonEnvironment() 
+    # The real nc_runner was created in setupPythonEnvironment()
     # First try to get from builtins (global scope)
     import builtins
     if hasattr(builtins, 'nc_runner') and builtins.nc_runner is not None:
         print("✓ Using global nc_runner from builtins")
         return builtins.nc_runner
-        
+
     # Then try globals()
     if 'nc_runner' in globals() and globals()['nc_runner'] is not None:
         print("✓ Using global nc_runner from globals")
         return globals()['nc_runner']
-    
+
     # Try direct access (might work in some contexts)
     try:
         if nc_runner is not None:
@@ -54,7 +54,7 @@ def get_real_runner():
             return nc_runner
     except NameError:
         pass
-            
+
     # If we get here, no global runner is available
     raise NameError("Global nc_runner not available in any scope")
 
@@ -62,7 +62,7 @@ def get_real_runner():
 class BlueprintTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        
+
         # Set up basic components first
         try:
             self.runner = self.build_runner()
@@ -73,13 +73,13 @@ class BlueprintTestCase(TestCase):
             self.nc_catalog = self.manager.tx_storage.nc_catalog
             self.now = int(self.reactor.seconds())
             self._token_index = 1
-            
+
             # Create HTR token UID - use a simple approach for testing
             self.htr_token_uid = TokenUid(b'\\x00' * 32)  # Simple zero-filled token UID
 
             from hathor.conf import HathorSettings
             self._settings = HathorSettings()
-            
+
         except Exception as e:
             print(f"setUp error: {e}")
             raise e
@@ -112,7 +112,7 @@ class BlueprintTestCase(TestCase):
             print(f"Error creating Address: {e}")
             # Fallback to simple bytes
             return Address(b'\\x00' * 25)
-    
+
     def gen_random_contract_id(self) -> ContractId:
         """Generate a random contract id."""
         try:
@@ -140,16 +140,21 @@ class BlueprintTestCase(TestCase):
         # Convert caller_id to hex string if it's an Address object
         caller_address_hex = None
         if caller_id is not None:
-            if hasattr(caller_id, 'hex'):
-                caller_address_hex = caller_id.hex()
-            elif isinstance(caller_id, bytes):
-                caller_address_hex = caller_id.hex()
-            else:
-                caller_address_hex = str(caller_id)
-        
+            try:
+                import base58
+                decoded_address = base58.b58decode(caller_id)
+                address = caller_id
+            except ValueError:
+                if isinstance(caller_id, bytes):
+                    address = base58.b58encode(caller_id)
+                else:
+                    address = str(caller_id)
+        else:
+            address = 'HLpBPMoYpCxYVnb8T7U8dF4tQcJPmWtb6M'
+
         # Use the existing _create_context function from pyodide setup
         return _create_context(
-            caller_address_hex=caller_address_hex,
+            caller_address=address,
             actions=actions,
             vertex=vertex,
             timestamp=timestamp
@@ -164,21 +169,21 @@ class BlueprintTestCase(TestCase):
         """Returns a read-write instance of a given contract."""
         # Use the real runner to get a readwrite contract instance
         return self.runner.get_readwrite_contract(contract_id)
-    
+
     def _register_blueprint_class(self, blueprint_class, blueprint_id=None):
         """Register a blueprint class with an optional id."""
         if blueprint_id is None:
             blueprint_id = self.gen_random_blueprint_id()
-        
+
         # Register with both our mock catalog and the real runner's transaction storage
         self.nc_catalog.blueprints[blueprint_id] = blueprint_class
-        
+
         # Also register with the real runner's tx_storage catalog if available
         try:
             self.runner.tx_storage.nc_catalog.blueprints[blueprint_id] = blueprint_class
         except (AttributeError, NameError):
             pass  # Fallback gracefully if real runner not available
-        
+
         return blueprint_id
 `;
 
