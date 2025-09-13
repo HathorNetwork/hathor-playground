@@ -147,21 +147,21 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
       let contractIdToUse: string | undefined;
 
       if (selectedMethod === 'initialize') {
-        addConsoleMessage('info', `Compiling and initializing ${activeFile.name}...`);
+        addConsoleMessage('info', `Deploying ${activeFile.name}...`);
         const compileResult = await contractsApi.compile({
           code: activeFile.content,
           blueprint_name: activeFile.name.replace('.py', ''),
         });
 
         if (!compileResult.success || !compileResult.blueprint_id) {
-          addConsoleMessage('error', 'Compilation failed');
+          addConsoleMessage('error', 'Deploy failed');
           compileResult.errors.forEach((error) => {
             addConsoleMessage('error', error);
           });
           setIsExecuting(false);
           return;
         }
-        addConsoleMessage('success', `✅ Successfully compiled ${activeFile.name}`);
+        addConsoleMessage('success', `✅ Successfully deployed ${activeFile.name}`);
         addConsoleMessage('info', `Blueprint ID: ${compileResult.blueprint_id}`);
         blueprintIdToUse = compileResult.blueprint_id;
         contractIdToUse = compileResult.blueprint_id; // For initialize, contractId is the blueprintId
