@@ -392,6 +392,7 @@ try:
         import builtins
         builtins.nc_runner = nc_runner
         globals()['nc_runner'] = nc_runner
+        globals()['settings'] = settings
 
         print("✓ Runner instance created and made globally available")
     except Exception as e:
@@ -573,7 +574,7 @@ try:
 
         # Create context
         actions_list = _create_actions('''${JSON.stringify(actions || [])}''')
-        context = _create_context(caller_address_hex='${caller_address}', actions=actions_list)
+        context = _create_context(caller_address='${caller_address}', actions=actions_list)
 
         # Convert arguments and kwargs from JSON to Python objects
         args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(request.kwargs)}''')
@@ -587,10 +588,7 @@ try:
             # Initialize new contract
             print(f"🏗️ Initializing contract with args: {args}")
 
-            # Use the real runner to initialize the contract
-            from hathor.nanocontracts.types import Address
-            caller_address = Address(_create_address_from_hex('${caller_address}'))
-
+            # Use the runner to initialize the contract
             nc_runner.create_contract(
                 contract_id,
                 blueprint_id,
