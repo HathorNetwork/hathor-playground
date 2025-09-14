@@ -23,6 +23,7 @@ module.exports = {
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Fira Code', 'Monaco', 'Consolas', 'monospace'],
+        satisfy: ['var(--font-satisfy)'],
       },
     },
   },
