@@ -19,8 +19,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <div className="flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <FileCode size={20} className="text-hathor-500" />
-            <span className="text-white font-bold">Hathor Nano Contracts IDE</span>
+            <img src="/logo.png" alt="Hathor Playground Logo" className="h-8 w-8" />
+            <span className="text-white font-bold font-satisfy text-[30px] pt-2 pl-3">Hathor Playground</span>
           </div>
         </div>
 
