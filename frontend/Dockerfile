@@ -39,6 +39,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Copy built application
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Copy public directory (includes hathor-modules.json.gz)
+COPY --from=builder /app/public ./public
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
