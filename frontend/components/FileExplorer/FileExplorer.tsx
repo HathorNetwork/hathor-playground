@@ -16,11 +16,11 @@ export const FileExplorer: React.FC = () => {
     if (newFileName.trim() && showNewFileInput) {
       const fileName = newFileName.endsWith('.py') ? newFileName : `${newFileName}.py`;
       const cleanName = newFileName.replace('.py', '').replace(/[^a-zA-Z]/g, '');
-      
+
       const newFile = {
         id: Date.now().toString(),
         name: fileName,
-        content: showNewFileInput === 'contracts' 
+        content: showNewFileInput === 'contracts'
           ? `from hathor.nanocontracts import Blueprint
 from hathor.nanocontracts.context import Context
 from hathor.nanocontracts.types import public, view
@@ -40,9 +40,9 @@ __blueprint__ = ${cleanName}`
           : '',
         language: 'python',
         path: showNewFileInput === 'contracts' ? `/contracts/${fileName}` : `/tests/${fileName}`,
-        type: showNewFileInput === 'contracts' ? 'contract' : 'test',
+        type: (showNewFileInput === 'contracts' ? 'contract' : 'test') as 'contract' | 'test',
       };
-      
+
       addFile(newFile);
       setNewFileName('');
       setShowNewFileInput(null);
