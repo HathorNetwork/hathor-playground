@@ -20,12 +20,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <span className="text-white font-bold">Hathor Nano Contracts IDE</span>
           </div>
 
-          {/* Current file */}
-          {fileName && (
-            <div className="text-gray-400 text-sm">
-              <span className="text-gray-500">Editing:</span> {fileName}
-            </div>
-          )}
+          
         </div>
 
         <div className="flex items-center gap-2">

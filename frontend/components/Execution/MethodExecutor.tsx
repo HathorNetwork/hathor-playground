@@ -1,28 +1,35 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Settings, Zap, TestTube, Loader2 } from 'lucide-react';
+import { Play, Settings, TestTube, Loader2 } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
-import { generateFrontendPrompt } from '@/utils/promptGenerator';
 
 interface MethodExecutorProps {
-  blueprintId?: string;
-  onCompile: () => void;
   onRunTests: () => void;
 }
 
-export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onCompile, onRunTests }) => {
+export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
-  const { addConsoleMessage, files, activeFileId, getContractInstance, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
+
+  const contractFiles = files.filter((f) => f.type === 'contract');
+
+  // Set default selected file
+  useEffect(() => {
+    if (!selectedFileId && contractFiles.length > 0) {
+      setSelectedFileId(contractFiles[0].id);
+    }
+  }, [contractFiles, selectedFileId]);
 
   // Get current file content to parse methods
-  const activeFile = files.find((f: File) => f.id === activeFileId);
-  
+  const activeFile = files.find((f: File) => f.id === selectedFileId);
+
   // Parse methods from current file
   const methodDefinitions = useMemo(() => {
     if (!activeFile?.content) return [];
@@ -30,7 +37,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
   }, [activeFile?.content]);
 
   // Get contract instance from store (persisted across address changes)
-  const contractInstance = blueprintId ? getContractInstance(blueprintId) : null;
+  const contractInstance = activeFile ? contractInstances[activeFile.id] : null;
   const contractId = contractInstance?.contractId;
 
   // Reset method selection when switching files and set default method
@@ -45,7 +52,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
       setSelectedMethod('');
       setParameterValues({});
     }
-  }, [methodDefinitions, activeFileId]); // Added activeFileId dependency
+  }, [methodDefinitions, selectedFileId]);
 
   // Update parameter values when method changes
   const handleMethodChange = (method: string) => {
@@ -83,44 +90,52 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
     },
   };
 
-  const handleGeneratePrompt = () => {
-    if (!activeFile) {
-      addConsoleMessage('error', 'No contract file loaded.');
-      return;
-    }
-    if (methodDefinitions.length === 0) {
-      addConsoleMessage('error', 'No methods found to generate prompt.');
-      return;
-    }
-    const prompt = generateFrontendPrompt(activeFile.name.replace('.py', ''), methodDefinitions);
-    navigator.clipboard.writeText(prompt)
-      .then(() => addConsoleMessage('success', 'Prompt copied to clipboard'))
-      .catch((err) => addConsoleMessage('error', `Failed to copy prompt: ${err}`));
-  };
-
-
   const handleExecute = async () => {
-    if (!blueprintId) {
-      addConsoleMessage('error', 'No compiled contract available. Please compile first.');
-      return;
-    }
-
-    // For initialize, use blueprint ID. For other methods, use contract ID
-    const targetId = selectedMethod === 'initialize' ? blueprintId : contractId;
-    
-    if (selectedMethod !== 'initialize' && !contractId) {
-      addConsoleMessage('error', 'Please initialize the contract first before calling other methods.');
+    if (!activeFile) {
+      addConsoleMessage('error', 'No contract file selected.');
       return;
     }
 
     setIsExecuting(true);
-    addConsoleMessage('info', `Calling method: ${selectedMethod}...`);
 
     try {
-      // Get current method definition
+      let blueprintIdToUse: string | undefined;
+      let contractIdToUse: string | undefined;
+
+      if (selectedMethod === 'initialize') {
+        addConsoleMessage('info', `Compiling and initializing ${activeFile.name}...`);
+        const compileResult = await contractsApi.compile({
+          code: activeFile.content,
+          blueprint_name: activeFile.name.replace('.py', ''),
+        });
+
+        if (!compileResult.success || !compileResult.blueprint_id) {
+          addConsoleMessage('error', 'Compilation failed');
+          compileResult.errors.forEach((error) => {
+            addConsoleMessage('error', error);
+          });
+          setIsExecuting(false);
+          return;
+        }
+        addConsoleMessage('success', `✅ Successfully compiled ${activeFile.name}`);
+        addConsoleMessage('info', `Blueprint ID: ${compileResult.blueprint_id}`);
+        blueprintIdToUse = compileResult.blueprint_id;
+        contractIdToUse = compileResult.blueprint_id; // For initialize, contractId is the blueprintId
+      } else {
+        const instance = contractInstances[activeFile.id];
+        if (!instance) {
+          addConsoleMessage('error', 'Please initialize the contract first.');
+          setIsExecuting(false);
+          return;
+        }
+        blueprintIdToUse = instance.blueprintId;
+        contractIdToUse = instance.contractId;
+        addConsoleMessage('info', `Executing ${selectedMethod} on ${activeFile.name}...`);
+      }
+
+      addConsoleMessage('info', `Calling method: ${selectedMethod}...`);
+
       const currentMethod = methodDefinitions.find(m => m.name === selectedMethod);
-      
-      // Prepare arguments from parameter values
       let args: any[] = [];
       if (currentMethod?.parameters && currentMethod.parameters.length > 0) {
         args = currentMethod.parameters.map(param => {
@@ -141,48 +156,41 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
             }
             return floatValue;
           } else if (param.type === 'address') {
-            // Convert address selection to hex string (backend will convert to bytes)
             if (value in callerAddresses) {
               return callerAddresses[value as keyof typeof callerAddresses];
             }
-            return value; // Return as-is if not a predefined address
+            return value;
           } else if (param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid') {
-            // For Hathor SDK ID types, validate hex string (32 bytes = 64 hex chars)
-            // If it's a predefined value from dropdown, it's already valid
             const finalValue = value || '';
             if (finalValue && (!/^[0-9a-fA-F]{64}$/.test(finalValue))) {
               throw new Error(`Invalid ${param.type} for ${param.name}: ${finalValue}. Must be 64 hex characters (32 bytes).`);
             }
             return finalValue;
           } else if (param.type === 'amount') {
-            // For Amount type, validate integer
             const amountValue = parseInt(value || '0');
             if (isNaN(amountValue) || amountValue < 0) {
               throw new Error(`Invalid amount for ${param.name}: ${value}. Must be a non-negative integer where last 2 digits are decimals.`);
             }
             return amountValue;
           } else if (param.type === 'timestamp') {
-            // For Timestamp type, validate Unix epoch seconds
             const timestampValue = parseInt(value || '0');
             if (isNaN(timestampValue) || timestampValue < 0) {
               throw new Error(`Invalid timestamp for ${param.name}: ${value}. Must be a non-negative integer (Unix epoch seconds).`);
             }
             return timestampValue;
           } else if (param.type === 'hex') {
-            // For hex parameters, ensure it's a valid hex string and return as-is
-            // Backend will convert to bytes
             if (value && !/^[0-9a-fA-F]*$/.test(value)) {
               throw new Error(`Invalid hex value for ${param.name}: ${value}. Use only 0-9 and a-f characters.`);
             }
             return value;
           } else {
-            return value; // string or other types
+            return value;
           }
         });
       }
 
       const result = await contractsApi.execute({
-        contract_id: targetId!,
+        contract_id: contractIdToUse!,
         method_name: selectedMethod,
         args,
         kwargs: {},
@@ -191,25 +199,18 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
         code: activeFile?.content,
       });
 
-      // Debug log to see what we're getting
-      console.log('Execution result:', result);
-
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
-        
-        // If this was initialize, capture the contract ID and store in global state
+
         if (selectedMethod === 'initialize' && result.result && typeof result.result === 'object' && 'contract_id' in result.result) {
           const newContractId = (result.result as any).contract_id;
-          
-          // Create contract instance and store it in the global state
           const newInstance: ContractInstance = {
-            blueprintId: blueprintId!,
+            blueprintId: blueprintIdToUse!,
             contractId: newContractId,
             contractName: activeFile?.name.replace('.py', '') || 'Unknown',
             timestamp: new Date()
           };
-          
-          addContractInstance(newInstance);
+          addContractInstance(activeFile.id, newInstance);
           addConsoleMessage('info', `Contract created with ID: ${newContractId}`);
         } else if (result.result !== undefined && result.result !== null) {
           addConsoleMessage('info', `Result: ${JSON.stringify(result.result)}`);
@@ -217,11 +218,9 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
           addConsoleMessage('info', 'Method completed (no return value)');
         }
       } else {
-        // Show detailed error message
         const errorMessage = result.error || 'Unknown error occurred';
         addConsoleMessage('error', `❌ Method execution failed:`);
         
-        // Parse and display error details
         if (errorMessage.includes('AttributeError')) {
           addConsoleMessage('error', `  → ${errorMessage}`);
           if (errorMessage.includes('cannot set a container field')) {
@@ -244,20 +243,9 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
     }
   };
 
-  if (!blueprintId && activeFile?.type !== 'test') {
-    return (
-      <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
-        <div className="text-gray-400 text-center">
-          <Settings className="mx-auto mb-2" size={20} />
-          <p className="text-sm">Compile a contract first to execute methods</p>
-        </div>
-      </div>
-    );
-  }
-
   if (methodDefinitions.length === 0 && activeFile?.type !== 'test') {
     return (
-      <div className="h-full bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
+      <div className="h-full p-4 flex items-center justify-center">
         <div className="text-gray-400 text-center">
           <Settings className="mx-auto mb-2" size={20} />
           <p className="text-sm">No methods found in contract</p>
@@ -268,17 +256,9 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
   }
 
   return (
-    <div className="h-full bg-gray-800 border-r border-gray-700 p-4 overflow-y-auto">
+    <div className="h-full p-4 overflow-y-auto">
+      <h3 className="text-lg font-semibold text-white mb-4">Deploy & Run</h3>
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-lg font-semibold text-white">Contract Methods</h3>
-          <button
-            onClick={handleGeneratePrompt}
-            className="px-2 py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded"
-          >
-            Generate Prompt
-          </button>
-        </div>
         {contractInstance && (
           <div className="bg-green-900/30 border border-green-700 rounded p-2 text-sm">
             <span className="text-green-400">✅ Contract Initialized</span>
@@ -289,7 +269,22 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
             </div>
           </div>
         )}
-        
+
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Contract File:</label>
+          <select
+            value={selectedFileId || ''}
+            onChange={(e) => setSelectedFileId(e.target.value)}
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500 mb-2"
+          >
+            {contractFiles.map((file) => (
+              <option key={file.id} value={file.id}>
+                {file.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Caller Address:
@@ -425,10 +420,10 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
             ) : (
               <input
                 type={
-                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp' 
-                    ? 'number' 
-                    : param.type === 'float' 
-                      ? 'number' 
+                  param.type === 'int' || param.type === 'amount' || param.type === 'timestamp'
+                    ? 'number'
+                    : param.type === 'float'
+                      ? 'number'
                       : 'text'
                 }
                 value={parameterValues[param.name] || ''}
@@ -438,19 +433,19 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
                 step={param.type === 'float' ? '0.1' : param.type === 'amount' || param.type === 'timestamp' ? '1' : undefined}
                 min={param.type === 'amount' || param.type === 'timestamp' ? '0' : undefined}
                 maxLength={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? 64 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? 64
                     : undefined
                 }
                 pattern={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
-                    ? '[0-9a-fA-F]{64}' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
+                    ? '[0-9a-fA-F]{64}'
                     : param.type === 'hex'
                       ? '[0-9a-fA-F]*'
                       : undefined
                 }
                 title={
-                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid' 
+                  param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid'
                     ? 'Enter exactly 64 hexadecimal characters (0-9, a-f, A-F)'
                     : param.type === 'hex'
                       ? 'Enter hexadecimal characters (0-9, a-f, A-F)'
@@ -465,47 +460,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ blueprintId, onC
           </div>
         ))}
 
-        {/* Run Tests Button - only show for test files */}
-        {activeFile?.type === 'test' && (
-          <button
-            onClick={onRunTests}
-            disabled={isRunningTests || isCompiling}
-            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${
-              isRunningTests || isCompiling
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-purple-600 text-white hover:bg-purple-700'
-            }`}
-          >
-            {isRunningTests ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <TestTube size={16} />
-            )}
-            {isRunningTests ? 'Running Tests...' : 'Run Tests'}
-          </button>
-        )}
-
-        {/* Compile Button - only show for contract files */}
-        {activeFile?.type !== 'test' && (
-          <button
-            onClick={onCompile}
-            disabled={isCompiling || isExecuting || isRunningTests}
-            className={`flex items-center justify-center gap-2 px-4 py-2 mb-2 rounded font-medium transition-colors ${
-              isCompiling || isExecuting || isRunningTests
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
-            {isCompiling ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Zap size={16} />
-            )}
-            {isCompiling ? 'Compiling...' : 'Compile'}
-          </button>
-        )}
-
-        {/* Execute Method Button - only show for contract files when compiled */}
+        {/* Execute Method Button */}
         {activeFile?.type !== 'test' && (
           <button
             onClick={handleExecute}
