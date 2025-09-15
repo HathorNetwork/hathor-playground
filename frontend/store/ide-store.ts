@@ -531,7 +531,7 @@ class CounterTestCase(BlueprintTestCase):
           name: stored.name,
           content: stored.content,
           language: stored.name.endsWith('.py') ? 'python' : 'text',
-          path: stored.type === 'test' ? `/tests/${stored.name}` : `/contracts/${stored.name}`,
+          path: `/contracts/${stored.name}`,
           type: (stored.type as 'contract' | 'test') || 'contract',
         }));
 
@@ -566,7 +566,7 @@ class CounterTestCase(BlueprintTestCase):
         content: file.content,
         lastModified: Date.now(),
         created: Date.now(), // This should ideally come from existing stored file
-        type: file.type || (file.name.endsWith('.py') ? 'contract' : 'other'),
+        type: (file.type === 'test' ? 'other' : file.type) || (file.name.endsWith('.py') ? 'contract' : 'other'),
       };
 
       // Check if file exists to preserve created date
