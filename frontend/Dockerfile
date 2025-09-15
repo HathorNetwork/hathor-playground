@@ -17,6 +17,9 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_API_URL=/
 
+# Update modules before building
+RUN npm run update-modules
+
 # Build the application
 RUN npm run build
 

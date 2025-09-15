@@ -225,7 +225,7 @@ export function IDE() {
       
       // Show pytest output as collapsible code block
       if (testResult.output && testResult.output.trim()) {
-        addConsoleMessage('code', testResult.output.trim(), 'Pytest Output', false);
+        addConsoleMessage('info', testResult.output.trim());
       }
       
       // Show additional error details if available
