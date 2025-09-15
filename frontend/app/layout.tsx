@@ -6,7 +6,7 @@ const inter = Inter({ subsets: ['latin'] })
 const satisfy = Satisfy({ subsets: ['latin'], weight: '400', variable: '--font-satisfy' })
 
 export const metadata = {
-  title: 'Nano Contracts IDE',
+  title: 'Hathor Playground',
   description: 'Development environment for Hathor Nano Contracts',
 }
 
