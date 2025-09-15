@@ -750,7 +750,6 @@ try:
     # Try to execute it to check for syntax errors
     compile(test_code, '${testFileName}', 'exec')
 
-
     # Run pytest and capture its output
     sys.stdout = captured_output
     sys.stderr = captured_output
