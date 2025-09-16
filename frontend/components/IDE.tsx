@@ -19,7 +19,7 @@ export function IDE() {
   const [isAICollapsed, setIsAICollapsed] = React.useState(true);
   const [isPyodideReady, setIsPyodideReady] = React.useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState('files');
+  const [activeTab, setActiveTab] = React.useState<'files' | 'run' | 'tests'>('files');
   const aiPanelRef = React.useRef<ImperativePanelHandle>(null);
   const codePanelRef = React.useRef<ImperativePanelHandle>(null);
   const leftSidebarPanelRef = React.useRef<ImperativePanelHandle>(null);
@@ -164,7 +164,7 @@ export function IDE() {
     }
   };
 
-  const handleTabClick = (tab: string) => {
+  const handleTabClick = (tab: 'files' | 'run' | 'tests') => {
     if (tab === activeTab) {
       setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed);
     } else {

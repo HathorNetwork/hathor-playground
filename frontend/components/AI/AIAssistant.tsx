@@ -47,15 +47,17 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
 
   // Get current chat session, creating one if needed
   const currentChatSession = getChatSession(activeChatSessionId || '') || null;
-  const messages: Message[] = currentChatSession ? currentChatSession.messages.map((msg: ChatMessage) => ({
-    id: msg.id,
-    type: msg.role === 'user' ? 'user' : 'assistant',
-    content: msg.content,
-    timestamp: new Date(msg.timestamp),
-    suggestions: msg.suggestions,
-    originalCode: msg.originalCode,
-    modifiedCode: msg.modifiedCode
-  })) : [];
+  const messages: Message[] = React.useMemo(() => {
+    return currentChatSession ? currentChatSession.messages.map((msg: ChatMessage) => ({
+      id: msg.id,
+      type: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+      timestamp: new Date(msg.timestamp),
+      suggestions: msg.suggestions,
+      originalCode: msg.originalCode,
+      modifiedCode: msg.modifiedCode
+    })) : [];
+  }, [currentChatSession]);
 
   // Ensure there's always an active chat session
   useEffect(() => {

@@ -590,7 +590,7 @@ class CounterTestCase(BlueprintTestCase):
         set({
           files,
           activeFileId: validActiveFileId,
-          openFileIds: [validActiveFileId]
+          openFileIds: validActiveFileId ? [validActiveFileId] : []
         });
 
         console.log(`Loaded ${files.length} files from storage`);
