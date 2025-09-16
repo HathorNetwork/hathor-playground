@@ -53,7 +53,7 @@ export interface ExecuteRequest {
   caller_address?: string;
   method_type?: 'public' | 'view';
   code?: string; // Contract code for method type detection
-  actions?: any[];
+  
 }
 
 export interface ExecuteResponse {
