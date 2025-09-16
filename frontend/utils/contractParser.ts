@@ -26,13 +26,13 @@ export function parseContractMethods(code: string): MethodDefinition[] {
     const line = lines[i].trim();
     
     // Look for method decorators
-    const decoratorMatch = line.match(/^@(public|view)$/);
+    const decoratorMatch = line.match(/^@(public|view)/);
     if (decoratorMatch && i + 1 < lines.length) {
       const decorator = decoratorMatch[1] as 'public' | 'view';
-      const nextLine = lines[i + 1].trim();
+      const block = lines.slice(i + 1, i + 11).join(' ');
       
       // Parse method definition
-      const methodMatch = nextLine.match(/^def\s+(\w+)\s*\((.*?)\)\s*(?:->\s*([^:]+))?:/);
+      const methodMatch = block.match(/def\s+(\w+)\s*\((.*?)\)\s*(?:->\s*([^:]+))?:/);
       if (methodMatch) {
         const methodName = methodMatch[1];
         const paramsString = methodMatch[2];
