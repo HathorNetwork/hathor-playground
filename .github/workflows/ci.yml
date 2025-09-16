@@ -42,3 +42,16 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Type check
+        run: npm run type-check
+      - name: Update modules
+        run: npm run update-modules
+      - name: Build application
+        run: npm run build
+        
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Frontend Docker Image
+        run: docker build -t hathor-playground-frontend:test ./frontend
