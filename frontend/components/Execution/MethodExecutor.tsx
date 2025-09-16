@@ -6,9 +6,7 @@ import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
 
-interface MethodExecutorProps {
-  onRunTests: () => void;
-}
+interface MethodExecutorProps {}
 
 interface Action {
   id: string;
@@ -17,7 +15,7 @@ interface Action {
   amount: string;
 }
 
-export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) => {
+export const MethodExecutor: React.FC<MethodExecutorProps> = ({}) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
