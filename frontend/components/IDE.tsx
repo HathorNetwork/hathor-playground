@@ -109,19 +109,19 @@ export function IDE() {
     }
   };
 
-  const handleRunTests = async () => {
-    if (!activeFile || activeFile.type !== 'test') return;
+  const handleRunTests = async (file: File) => {
+    if (!file || file.type !== 'test') return;
 
     setIsRunningTests(true);
-    addConsoleMessage('info', `Running tests from ${activeFile.name}...`);
+    addConsoleMessage('info', `Running tests from ${file.name}...`);
 
     try {
       const { validateTestBlueprints, combineCodeForTesting } = await import('../utils/testParser');
       const { pyodideRunner } = await import('../lib/pyodide-runner');
       
-      const contractFiles = files.filter(file => file.type !== 'test');
+      const contractFiles = files.filter(f => f.type !== 'test');
       
-      const validation = validateTestBlueprints(activeFile, contractFiles);
+      const validation = validateTestBlueprints(file, contractFiles);
       
       if (!validation.isValid) {
         validation.errors.forEach(error => {
@@ -130,9 +130,9 @@ export function IDE() {
         return;
       }
       
-      const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
+      const combinedCode = combineCodeForTesting(contractFiles, file, validation.references);
       
-      const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
+      const testResult = await pyodideRunner.runTests(combinedCode, file.name);
       
       if (testResult.success) {
         const testsRun = testResult.tests_run || 0;

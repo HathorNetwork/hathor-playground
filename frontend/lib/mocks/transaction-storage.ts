@@ -1,6 +1,8 @@
 export const transactionStorageMock = `# Stub module for browser compatibility
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
+from unittest.mock import MagicMock
+from hathor.conf import HathorSettings
 
 class BlueprintNotFoundError(Exception):
     """Raised when a blueprint is not found in storage."""
@@ -48,19 +50,13 @@ class MockTransactionStorage(BaseTransactionStorage):
 
         # Store settings for genesis transaction construction
         if settings is None:
-            try:
-                from hathor.conf import HathorSettings
-                self._settings = HathorSettings()
-            except:
-                self._settings = None
+            self._settings = globals().get('settings') or HathorSettings()
         else:
             self._settings = settings
 
         # Add nc_catalog for compatibility with BlueprintTestCase
-        from unittest.mock import MagicMock
         self.nc_catalog = MagicMock()
         self.nc_catalog.blueprints = {}
-        # TODO can we merge _blueprints and nc_catalog?
 
     def get_transaction(self, tx_id):
         """Get transaction by ID - returns OnChainBlueprint instance if exists."""
@@ -121,12 +117,7 @@ class MockTransactionStorage(BaseTransactionStorage):
             # Use stored settings or try to get from global context
             settings = self._settings
             if settings is None:
-                try:
-                    from hathor.conf import HathorSettings
-                    settings = globals().get('settings') or HathorSettings()
-                except:
-                    from hathor.conf import HathorSettings
-                    settings = HathorSettings()
+                settings = globals().get('settings') or HathorSettings()
 
             # Check which genesis transaction this hash corresponds to
             if hasattr(settings, 'GENESIS_TX1_HASH') and hash_id == settings.GENESIS_TX1_HASH:
@@ -172,7 +163,6 @@ class MockTransactionStorage(BaseTransactionStorage):
         except Exception as e:
             print(f"Failed to create genesis transaction: {e}")
             # Final fallback to mock
-            from unittest.mock import MagicMock
             mock_tx = MagicMock()
             mock_tx.hash = hash_id
             mock_tx.timestamp = int(__import__('time').time())
