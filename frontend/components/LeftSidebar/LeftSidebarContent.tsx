@@ -8,7 +8,7 @@ import { useIDEStore, File } from '@/store/ide-store';
 
 interface LeftSidebarContentProps {
   activeTab: 'files' | 'run' | 'tests';
-  onRunTests: () => void;
+  onRunTests: (file: File) => void;
 }
 
 const TestsView: React.FC<{ onRunTests: (file: File) => void }> = ({ onRunTests }) => {
@@ -62,7 +62,7 @@ export const LeftSidebarContent: React.FC<LeftSidebarContentProps> = ({ activeTa
     case 'files':
       return <FileExplorer />;
     case 'run':
-      return <MethodExecutor onRunTests={() => {}} />;
+      return <MethodExecutor />;
     case 'tests':
       return <TestsView onRunTests={onRunTests} />;
     default:
