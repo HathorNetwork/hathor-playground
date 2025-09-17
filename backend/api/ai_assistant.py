@@ -8,6 +8,7 @@ import structlog
 import openai
 import os
 import re
+import xml.etree.ElementTree as ET
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -18,63 +19,71 @@ def extract_modified_code_from_response(
     original_code: str = None
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    Extract modified code from AI response.
+    Extract modified code from AI response using XML parsing.
     Returns (diff_text, original_code, modified_code)
     """
     try:
-        # First, look for properly marked modified code blocks
+        # First, try to extract code from <modified_code> XML tags
+        modified_code_match = re.search(
+            r'<modified_code>(.*?)</modified_code>',
+            response_text,
+            re.DOTALL
+        )
+
+        if modified_code_match and original_code:
+            modified_code = modified_code_match.group(1).strip()
+
+            # Remove any code block markers that might be inside the XML
+            if modified_code.startswith('```python'):
+                # Remove opening ```python and closing ```
+                lines = modified_code.split('\n')
+                if lines[0].strip() == '```python':
+                    lines = lines[1:]  # Remove first line
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]  # Remove last line
+                modified_code = '\n'.join(lines)
+            elif modified_code.startswith('```') and modified_code.endswith('```'):
+                # Remove any other code block markers
+                lines = modified_code.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                modified_code = '\n'.join(lines)
+
+            logger.info(
+                "Successfully extracted code from <modified_code> XML tag")
+            return None, original_code, modified_code
+
+        # Fallback: look for ```python:modified blocks (legacy support)
         modified_pattern = r'```python:modified\n(.*?)\n```'
         modified_matches = re.findall(
             modified_pattern, response_text, re.DOTALL)
 
-        # If no python:modified blocks found, try regular python blocks
-        if not modified_matches:
-            # Check if the response seems to be providing a code modification
-            modification_indicators = [
-                "here's the updated",
-                "here's the modified",
-                "here's the fixed",
-                "updated code",
-                "modified code",
-                "fixed code",
-                "complete code",
-                "here is the updated",
-                "here is the modified",
-                "here is the fixed"
-            ]
-
-            has_modification_intent = any(
-                indicator in response_text.lower()
-                for indicator in modification_indicators)
-
-            if has_modification_intent:
-                # Try to find regular python blocks
-                regular_pattern = r'```python\n(.*?)\n```'
-                regular_matches = re.findall(
-                    regular_pattern, response_text, re.DOTALL)
-
-                if regular_matches and original_code:
-                    # Use the regular python block as modified code
-                    modified_code = regular_matches[0]
-
-                    # Log warning that AI didn't use proper marker
-                    logger.warning(
-                        "AI used regular python block instead of "
-                        "python:modified marker")
-
-                    # Check if this looks like a complete file
-                    if ("from hathor" in modified_code or
-                            "import" in modified_code or
-                            "class" in modified_code):
-                        return None, original_code, modified_code
-
-        # If we found properly marked modified blocks
-        elif modified_matches and original_code:
-            # Take the first modified code found
+        if modified_matches and original_code:
             modified_code = modified_matches[0]
+            logger.info("Extracted code from python:modified block (legacy)")
             return None, original_code, modified_code
 
+        # Second fallback: regular python blocks if they contain full contract structure
+        regular_pattern = r'```python\n(.*?)\n```'
+        regular_matches = re.findall(
+            regular_pattern, response_text, re.DOTALL)
+
+        if regular_matches and original_code:
+            modified_code = regular_matches[0]
+            # Check if this looks like a complete contract file
+            if ("from hathor" in modified_code or
+                    "import" in modified_code or
+                    "class" in modified_code or
+                    "__blueprint__" in modified_code):
+                logger.warning(
+                    "Extracted code from regular python block - "
+                    "AI should use <modified_code> XML tags")
+                return None, original_code, modified_code
+
         # No code modifications found
+        logger.debug("No modified code found in response")
         return None, None, None
 
     except Exception as e:
@@ -95,6 +104,7 @@ class ChatRequest(BaseModel):
     current_file_content: Optional[str] = None
     current_file_name: Optional[str] = None
     console_messages: List[str] = Field(default_factory=list)
+    execution_logs: Optional[str] = None  # Logs from Pyodide execution
     context: Optional[Dict[str, Any]] = None
     # Recent conversation history
     conversation_history: List[ChatMessage] = Field(default_factory=list)
@@ -112,10 +122,9 @@ class ChatResponse(BaseModel):
 
 # Hathor-specific system prompt
 HATHOR_SYSTEM_PROMPT = """
-🚨 CRITICAL DIFF GENERATION RULE: When users ask for code changes, fixes,
-improvements, or modifications, you MUST use ```python:modified for the
-complete updated file content. This is mandatory for the IDE diff system
-to work.
+🚨 CRITICAL CODE MODIFICATION RULE: When users ask for code changes, fixes,
+improvements, or modifications, you MUST use XML tags to provide the complete
+updated file content. This is mandatory for the IDE diff system to work.
 
 You are Clippy, a helpful AI assistant for Hathor Nano Contracts development! 📎
 
@@ -355,25 +364,31 @@ You help developers with:
 
 🔥 CODE MODIFICATION (MANDATORY RULE):
 When users request code changes, fixes, improvements, or modifications, you
-MUST use this EXACT format:
+MUST use this EXACT XML format:
 
-```python:modified
+<modified_code>
 # Complete modified file content here
 from hathor.nanocontracts.blueprint import Blueprint
 # ... all the updated code ...
 __blueprint__ = ClassName
-```
+</modified_code>
 
-TRIGGER WORDS requiring python:modified:
+TRIGGER WORDS requiring <modified_code>:
 "fix", "change", "update", "modify", "improve", "add", "remove", "implement",
 "apply changes", "do the changes", "make the changes"
 
+✅ ALWAYS use <modified_code></modified_code> XML tags for any code the user should apply to their file
 ❌ NEVER use regular ```python blocks for code modifications
-✅ ALWAYS use ```python:modified for any code the user should apply to their
-file
+❌ NEVER use ```python:modified blocks (legacy format)
 
-This triggers the IDE's diff viewer - essential for the system to work
-properly!
+The XML format is parsed reliably and triggers the IDE's diff viewer - essential for the system to work properly!
+
+📋 STRUCTURED CONTEXT FORMAT:
+When analyzing user context, you may see structured information in XML format:
+- <execution_logs>...</execution_logs> - Recent code execution logs from Pyodide
+- <console_messages>...</console_messages> - IDE console output
+- <current_file>...</current_file> - Current file being edited
+Use this structured information to provide better assistance.
 
 Be friendly, helpful, and use appropriate emojis! When you see code issues,
 offer specific suggestions with examples.
@@ -418,18 +433,29 @@ async def chat_with_assistant(request: ChatRequest):
         # Prepare the context for the AI
         context_parts = [HATHOR_SYSTEM_PROMPT]
 
-        # Add current file context if available
+        # Add current file context if available using XML structure
         if request.current_file_content and request.current_file_name:
             context_parts.append(
-                f"\nCURRENT FILE: {request.current_file_name}\n"
-                f"```python\n{request.current_file_content}\n```"
+                f"\n<current_file name=\"{request.current_file_name}\">\n"
+                f"{request.current_file_content}\n"
+                f"</current_file>"
             )
 
-        # Add console messages if available (recent errors/warnings)
+        # Add console messages if available using XML structure
         if request.console_messages:
             recent_messages = request.console_messages[-5:]  # Last 5 messages
+            messages_xml = "\n".join(
+                f"<message>{msg}</message>" for msg in recent_messages)
             context_parts.append(
-                "\nRECENT CONSOLE MESSAGES:\n" + "\n".join(recent_messages))
+                f"\n<console_messages>\n{messages_xml}\n</console_messages>"
+            )
+
+        # Add execution logs from Pyodide if available using XML structure
+        if request.execution_logs:
+            context_parts.append(
+                f"\n<execution_logs>\n{
+                    request.execution_logs}\n</execution_logs>"
+            )
 
         # Add any additional context
         if request.context:
@@ -500,7 +526,8 @@ async def chat_with_assistant(request: ChatRequest):
             any(
                 "error" in msg.lower()
                 for msg in request.console_messages
-            )
+            ) or
+            (request.execution_logs and "error" in request.execution_logs.lower())
         ):
             suggestions.extend([
                 "Check your method decorators (@public/@view)",

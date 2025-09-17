@@ -1,35 +1,25 @@
-# Backend Dockerfile
+# Backend Dockerfile - LLM API Service
 FROM python:3.11-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies including RocksDB
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
+    gcc \
     curl \
-    git \
-    librocksdb-dev \
-    libsnappy-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    liblz4-dev \
-    libzstd-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
-COPY nano-contracts-ide/backend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy hathor package from parent directory
-COPY hathor ./hathor
-
 # Copy application code
-COPY nano-contracts-ide/backend .
+COPY . .
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app \

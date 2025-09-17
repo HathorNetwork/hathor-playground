@@ -37,6 +37,7 @@ export function IDE() {
     addCompiledContract,
     clearContractInstances,
     initializeStore,
+    setLastExecutionLogs,
   } = useIDEStore();
 
   // Initialize storage on component mount
@@ -131,6 +132,11 @@ export function IDE() {
       const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
       
       const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
+      
+      // Save test execution logs to store
+      if (testResult.output) {
+        setLastExecutionLogs(testResult.output);
+      }
       
       if (testResult.success) {
         const testsRun = testResult.tests_run || 0;

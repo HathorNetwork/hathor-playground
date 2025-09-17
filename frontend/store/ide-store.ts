@@ -35,6 +35,7 @@ interface IDEState {
   // Console
   consoleMessages: ConsoleMessage[];
   messageIdCounter: number;
+  lastExecutionLogs: string | null;  // Store last execution logs from Pyodide
 
   // Contracts
   compiledContracts: Contract[];
@@ -61,6 +62,7 @@ interface IDEState {
 
   addConsoleMessage: (type: ConsoleMessage['type'], message: string) => void;
   clearConsole: () => void;
+  setLastExecutionLogs: (logs: string | null) => void;
 
   addCompiledContract: (contract: Contract) => void;
   addContractInstance: (fileId: string, instance: ContractInstance) => void;
@@ -306,6 +308,7 @@ class CounterTestCase(BlueprintTestCase):
 
   consoleMessages: [],
   messageIdCounter: 0,
+  lastExecutionLogs: null,
   compiledContracts: [],
   contractInstances: {},
 
@@ -431,7 +434,10 @@ class CounterTestCase(BlueprintTestCase):
     set(() => ({
       consoleMessages: [],
       messageIdCounter: 0,
+      lastExecutionLogs: null,
     })),
+
+  setLastExecutionLogs: (logs) => set(() => ({ lastExecutionLogs: logs })),
 
   addCompiledContract: (contract) =>
     set((state) => ({

@@ -16,7 +16,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('alice');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
+  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests, setLastExecutionLogs } = useIDEStore();
 
   const contractFiles = files.filter((f) => f.type === 'contract');
 
@@ -199,6 +199,14 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
         code: activeFile?.content,
       });
 
+      // Save execution logs from Pyodide to store
+      if (result.logs && result.logs.length > 0) {
+        setLastExecutionLogs(result.logs.join('\n'));
+      } else if ((result as any).output) {
+        // Fallback to output field if logs is not available
+        setLastExecutionLogs((result as any).output);
+      }
+
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
 
@@ -238,6 +246,8 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
       }
     } catch (error: any) {
       addConsoleMessage('error', `Execution error: ${error.message || error}`);
+      // Clear execution logs on error
+      setLastExecutionLogs(null);
     } finally {
       setIsExecuting(false);
     }
