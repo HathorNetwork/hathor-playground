@@ -5,14 +5,32 @@ import types
 from pathlib import Path
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
-# The ai_assistant module used in main.py has syntax issues in this repo.
-# Provide a minimal stub so we can import the FastAPI app for testing.
+# Provide minimal stubs for modules used in main.py
 
 # Ensure backend directory is on path for module resolution
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
+# Mock middleware module
+middleware_module = types.ModuleType("middleware")
+rate_limit_module = types.ModuleType("middleware.rate_limit")
+
+# Create mock objects
+rate_limit_module.limiter = Limiter(
+    key_func=get_remote_address, storage_uri="memory://")
+rate_limit_module.token_limit_middleware = lambda request, \
+    call_next: call_next(
+        request)
+rate_limit_module.rate_limit_exceeded_handler = lambda request, exc: None
+
+middleware_module.rate_limit = rate_limit_module
+sys.modules.setdefault("middleware", middleware_module)
+sys.modules.setdefault("middleware.rate_limit", rate_limit_module)
+
+# Mock API module
 api_module = types.ModuleType("api")
 ai_module = types.ModuleType("api.ai_assistant")
 ai_module.router = APIRouter()
