@@ -1,13 +1,19 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { Terminal, Trash2, AlertCircle, CheckCircle, Info, AlertTriangle } from 'lucide-react';
-import { useIDEStore, ConsoleMessage } from '@/store/ide-store';
+import { Terminal, Trash2, AlertCircle, CheckCircle, Info, AlertTriangle, TestTube } from 'lucide-react';
+import { useIDEStore, ConsoleMessage, File } from '@/store/ide-store';
 import { clsx } from 'clsx';
 
-export const Console: React.FC = () => {
-  const { consoleMessages, clearConsole } = useIDEStore();
+interface ConsoleProps {
+  onRunTests: () => void;
+}
+
+export const Console: React.FC<ConsoleProps> = ({ onRunTests }) => {
+  const { consoleMessages, clearConsole, files, activeFileId, isRunningTests } = useIDEStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const activeFile = files.find((f) => f.id === activeFileId);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -52,18 +58,29 @@ export const Console: React.FC = () => {
 
   return (
     <div className="h-full bg-gray-900 text-gray-100 flex flex-col">
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+      <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700 min-h-[42px]">
         <div className="flex items-center gap-2">
           <Terminal size={16} />
           <span className="text-sm font-medium">Console</span>
+          {activeFile?.type === 'test' && (
+            <button
+              onClick={onRunTests}
+              disabled={isRunningTests}
+              className="flex items-center gap-1.5 ml-4 px-2 py-1 text-xs bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
+            >
+              Run Tests
+            </button>
+          )}
         </div>
-        <button
-          onClick={clearConsole}
-          className="p-1 hover:bg-gray-700 rounded transition-colors"
-          title="Clear Console"
-        >
-          <Trash2 size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={clearConsole}
+            className="p-1 hover:bg-gray-700 rounded transition-colors"
+            title="Clear Console"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
       </div>
 
       <div

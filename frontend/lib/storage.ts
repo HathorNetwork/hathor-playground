@@ -9,7 +9,7 @@ export interface StoredFile {
   content: string;
   lastModified: number;
   created: number;
-  type: 'contract' | 'other';
+  type: 'contract' | 'test';
 }
 
 export interface ChatMessage {
