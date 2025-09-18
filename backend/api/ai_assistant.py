@@ -2,7 +2,7 @@
 AI Assistant API router - handles AI assistant requests
 """
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 import structlog
 import os
@@ -10,7 +10,7 @@ import re
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.gemini import GeminiModel
-from middleware.rate_limit import token_tracker, limiter
+from middleware.rate_limit import token_tracker
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -67,7 +67,8 @@ def extract_modified_code_from_response(
                 if lines and lines[-1].strip() == '```':
                     lines = lines[:-1]  # Remove last line
                 modified_code = '\n'.join(lines)
-            elif modified_code.startswith('```') and modified_code.endswith('```'):
+            elif modified_code.startswith('```') \
+                    and modified_code.endswith('```'):
                 # Remove any other code block markers
                 lines = modified_code.split('\n')
                 if lines[0].startswith('```'):
@@ -90,7 +91,8 @@ def extract_modified_code_from_response(
             logger.info("Extracted code from python:modified block (legacy)")
             return None, original_code, modified_code
 
-        # Second fallback: regular python blocks if they contain full contract structure
+        # Second fallback: regular python blocks if they contain full
+        # contract structure
         regular_pattern = r'```python\n(.*?)\n```'
         regular_matches = re.findall(
             regular_pattern, response_text, re.DOTALL)
@@ -402,15 +404,18 @@ TRIGGER WORDS requiring <modified_code>:
 "fix", "change", "update", "modify", "improve", "add", "remove", "implement",
 "apply changes", "do the changes", "make the changes"
 
-✅ ALWAYS use <modified_code></modified_code> XML tags for any code the user should apply to their file
+✅ ALWAYS use <modified_code></modified_code> XML tags for any code the user
+should apply to their file
 ❌ NEVER use regular ```python blocks for code modifications
 ❌ NEVER use ```python:modified blocks (legacy format)
 
-The XML format is parsed reliably and triggers the IDE's diff viewer - essential for the system to work properly!
+The XML format is parsed reliably and triggers the IDE's diff viewer -
+essential for the system to work properly!
 
 📋 STRUCTURED CONTEXT FORMAT:
 When analyzing user context, you may see structured information in XML format:
-- <execution_logs>...</execution_logs> - Recent code execution logs from Pyodide
+- <execution_logs>...</execution_logs> - Recent code execution logs from
+Pyodide
 - <console_messages>...</console_messages> - IDE console output
 - <current_file>...</current_file> - Current file being edited
 Use this structured information to provide better assistance.
@@ -478,7 +483,8 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
         # Add execution logs from Pyodide if available using XML structure
         if request.execution_logs:
             context_parts.append(
-                f"\n<execution_logs>\n{request.execution_logs}\n</execution_logs>"
+                f"\n<execution_logs>\n{
+                    request.execution_logs}\n</execution_logs>"
             )
 
         # Add any additional context
@@ -503,7 +509,8 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
 
         # Create conversation context
         conversation_context = "\n\n".join(
-            conversation_messages) if conversation_messages else request.message
+            conversation_messages) if conversation_messages \
+            else request.message
 
         # Use Pydantic AI agent with dynamic system prompt
         agent = Agent(
@@ -534,7 +541,7 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
             if total_tokens != estimated_tokens:
                 # Adjust token tracking if significantly different
                 adjustment = total_tokens - estimated_tokens
-                if abs(adjustment) > 50:  # Only adjust for significant differences
+                if abs(adjustment) > 50:  # Only adjust for significant diff
                     await token_tracker.consume_tokens(client_ip, adjustment)
 
             logger.info(
@@ -577,7 +584,8 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
                 "error" in msg.lower()
                 for msg in request.console_messages
             ) or
-            (request.execution_logs and "error" in request.execution_logs.lower())
+            (request.execution_logs and "error" in
+             request.execution_logs.lower())
         ):
             suggestions.extend([
                 "Check your method decorators (@public/@view)",
