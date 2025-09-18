@@ -241,6 +241,7 @@ export interface ChatRequest {
   current_file_content?: string;
   current_file_name?: string;
   console_messages?: string[];
+  execution_logs?: string;  // Logs from Pyodide execution
   context?: Record<string, any>;
   conversation_history?: ChatMessage[];
 }

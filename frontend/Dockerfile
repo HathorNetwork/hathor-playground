@@ -13,9 +13,12 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Build arguments for configurable API URL
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/}
+
 # Set environment for production build
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_PUBLIC_API_URL=/
 
 # Update modules before building
 RUN npm run update-modules
@@ -32,9 +35,13 @@ RUN apk add --no-cache curl
 # Set working directory
 WORKDIR /app
 
+# Build arguments for runtime configuration
+ARG NEXT_PUBLIC_API_URL
+
 # Set environment
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/}
 
 # Copy built application
 COPY --from=builder /app/.next/standalone ./

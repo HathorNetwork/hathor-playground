@@ -33,7 +33,8 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
   const { 
     files, 
     activeFileId, 
-    consoleMessages, 
+    consoleMessages,
+    lastExecutionLogs, 
     updateFile, 
     chatSessions,
     activeChatSessionId,
@@ -75,6 +76,19 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Clean XML tags from message content for display
+  const cleanMessageContent = (content: string): string => {
+    return content
+      // Remove <modified_code> tags and their content (since it's shown in diff viewer)
+      .replace(/<modified_code>[\s\S]*?<\/modified_code>/g, '')
+      // Remove other common XML tags that shouldn't be displayed
+      .replace(/<execution_logs>[\s\S]*?<\/execution_logs>/g, '')
+      .replace(/<console_messages>[\s\S]*?<\/console_messages>/g, '')
+      .replace(/<current_file[^>]*>[\s\S]*?<\/current_file>/g, '')
+      // Clean up any extra whitespace
+      .trim();
+  };
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading || !activeChatSessionId) return;
 
@@ -108,6 +122,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
         current_file_content: activeFile?.content,
         current_file_name: activeFile?.name,
         console_messages: recentConsoleMessages,
+        execution_logs: lastExecutionLogs || undefined,  // Include execution logs from Pyodide
         conversation_history: conversationHistory,
         context: {
           total_files: files.length,
@@ -308,7 +323,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
                         ),
                     }}
                   >
-                    {message.content}
+                    {cleanMessageContent(message.content)}
                   </ReactMarkdown>
                 </div>
               ) : (
@@ -316,10 +331,10 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
               )}
 
               {/* Diff Viewer */}
-              {message.originalCode && message.modifiedCode && activeFile && (
+              {message.modifiedCode && activeFile && (
                 <div className="mt-3">
                   <DiffViewer
-                    originalCode={message.originalCode}
+                    originalCode={message.originalCode || activeFile.content || ''}
                     modifiedCode={message.modifiedCode}
                     fileName={activeFile.name}
                     onApply={(modifiedCode) => handleApplyDiff(modifiedCode, message.id)}
