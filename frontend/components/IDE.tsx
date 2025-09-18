@@ -21,7 +21,7 @@ export function IDE() {
   const [isAICollapsed, setIsAICollapsed] = React.useState(true);
   const [isPyodideReady, setIsPyodideReady] = React.useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<'files' | 'run' | 'tests'>('files');
+  const [activeTab, setActiveTab] = React.useState<'files' | 'run'>('files');
   const aiPanelRef = React.useRef<ImperativePanelHandle>(null);
   const codePanelRef = React.useRef<ImperativePanelHandle>(null);
   const leftSidebarPanelRef = React.useRef<ImperativePanelHandle>(null);
@@ -109,11 +109,11 @@ export function IDE() {
     }
   };
 
-  const handleRunTests = async (file: File) => {
-    if (!file || file.type !== 'test') return;
+  const handleRunTests = async () => {
+    if (!activeFile || activeFile.type !== 'test') return;
 
     setIsRunningTests(true);
-    addConsoleMessage('info', `Running tests from ${file.name}...`);
+    addConsoleMessage('info', `Running tests from ${activeFile.name}...`);
 
     try {
       const { validateTestBlueprints, combineCodeForTesting } = await import('../utils/testParser');
@@ -121,7 +121,7 @@ export function IDE() {
       
       const contractFiles = files.filter(f => f.type !== 'test');
       
-      const validation = validateTestBlueprints(file, contractFiles);
+      const validation = validateTestBlueprints(activeFile, contractFiles);
       
       if (!validation.isValid) {
         validation.errors.forEach(error => {
@@ -130,9 +130,9 @@ export function IDE() {
         return;
       }
       
-      const combinedCode = combineCodeForTesting(contractFiles, file, validation.references);
+      const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
       
-      const testResult = await pyodideRunner.runTests(combinedCode, file.name);
+      const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
       
       if (testResult.success) {
         const testsRun = testResult.tests_run || 0;
@@ -166,7 +166,7 @@ export function IDE() {
     }
   };
 
-  const handleTabClick = (tab: 'files' | 'run' | 'tests') => {
+  const handleTabClick = (tab: 'files' | 'run') => {
     if (tab === activeTab) {
       setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed);
     } else {
@@ -211,25 +211,12 @@ export function IDE() {
             Deploy & Run
           </div>
         </button>
-        <button
-          onClick={() => handleTabClick('tests')}
-          className={clsx('p-2 rounded-lg transition-colors relative group', {
-            'bg-blue-600 text-white': activeTab === 'tests' && !isLeftSidebarCollapsed,
-            'text-gray-400 hover:bg-gray-700': activeTab !== 'tests' || isLeftSidebarCollapsed,
-          })}
-          title="Tests"
-        >
-          <Beaker size={24} />
-          <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
-            Tests
-          </div>
-        </button>
+        
       </div>
         <PanelGroup direction="horizontal">
           <Panel ref={leftSidebarPanelRef} collapsible={true} defaultSize={30} minSize={5} maxSize={40}>
             <LeftSidebarContent
               activeTab={activeTab}
-              onRunTests={handleRunTests}
             />
           </Panel>
           <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
@@ -241,7 +228,7 @@ export function IDE() {
               </Panel>
               <PanelResizeHandle className="h-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
               <Panel defaultSize={30} minSize={15}>
-                <Console />
+                <Console onRunTests={handleRunTests} />
               </Panel>
             </PanelGroup>
           </Panel>
