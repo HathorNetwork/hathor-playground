@@ -55,7 +55,7 @@ def extract_modified_code_from_response(
             re.DOTALL
         )
 
-        if modified_code_match and original_code:
+        if modified_code_match:
             modified_code = modified_code_match.group(1).strip()
 
             # Remove any code block markers that might be inside the XML
