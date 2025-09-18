@@ -8,19 +8,21 @@ import { useIDEStore, File } from '@/store/ide-store';
 
 interface LeftSidebarContentProps {
   activeTab: 'files' | 'run' | 'tests';
-  onRunTests: () => void;
+  onRunTests: (file: File) => void;
 }
 
-const TestsView: React.FC<{ onRunTests: () => void }> = ({ onRunTests }) => {
-  const { files, setActiveFile, activeFileId } = useIDEStore();
+const TestsView: React.FC<{ onRunTests: (file: File) => void }> = ({ onRunTests }) => {
+  const { files } = useIDEStore();
   const testFiles = files.filter((file) => file.type === 'test');
-  const activeTestFile = files.find((file) => file.id === activeFileId && file.type === 'test');
+  const [selectedTestFileId, setSelectedTestFileId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!activeTestFile && testFiles.length > 0) {
-      setActiveFile(testFiles[0].id);
+    if (!selectedTestFileId && testFiles.length > 0) {
+      setSelectedTestFileId(testFiles[0].id);
     }
-  }, [activeTestFile, testFiles, setActiveFile]);
+  }, [testFiles, selectedTestFileId]);
+
+  const selectedTestFile = files.find((file) => file.id === selectedTestFileId);
 
   return (
     <div className="p-4">
@@ -32,8 +34,8 @@ const TestsView: React.FC<{ onRunTests: () => void }> = ({ onRunTests }) => {
           </label>
           <select
             id="test-file-select"
-            value={activeFileId || ''}
-            onChange={(e) => setActiveFile(e.target.value)}
+            value={selectedTestFileId || ''}
+            onChange={(e) => setSelectedTestFileId(e.target.value)}
             className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {testFiles.map((file) => (
@@ -44,8 +46,8 @@ const TestsView: React.FC<{ onRunTests: () => void }> = ({ onRunTests }) => {
           </select>
         </div>
         <button
-          onClick={onRunTests}
-          disabled={!activeTestFile}
+          onClick={() => selectedTestFile && onRunTests(selectedTestFile)}
+          disabled={!selectedTestFile}
           className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
         >
           Run Tests
@@ -60,7 +62,7 @@ export const LeftSidebarContent: React.FC<LeftSidebarContentProps> = ({ activeTa
     case 'files':
       return <FileExplorer />;
     case 'run':
-      return <MethodExecutor onRunTests={() => {}} />;
+      return <MethodExecutor />;
     case 'tests':
       return <TestsView onRunTests={onRunTests} />;
     default:

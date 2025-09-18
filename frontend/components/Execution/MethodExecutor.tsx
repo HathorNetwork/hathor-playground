@@ -1,22 +1,28 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Settings, TestTube, Loader2 } from 'lucide-react';
+import { Play, Settings, TestTube, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
 
-interface MethodExecutorProps {
-  onRunTests: () => void;
+interface MethodExecutorProps { }
+
+interface Action {
+  id: string;
+  type: 'deposit' | 'withdrawal';
+  tokenId: string;
+  amount: string;
 }
 
-export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) => {
+export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
-  const [selectedCaller, setSelectedCaller] = useState<string>('alice');
+  const [selectedCaller, setSelectedCaller] = useState<string>('Alice');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests, setLastExecutionLogs } = useIDEStore();
+  const [actions, setActions] = useState<Action[]>([]);
+  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
 
   const contractFiles = files.filter((f) => f.type === 'contract');
 
@@ -48,9 +54,11 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
       const defaultMethod = initMethod ? initMethod.name : methodDefinitions[0].name;
       setSelectedMethod(defaultMethod);
       setParameterValues({}); // Clear parameter values when switching contracts
+      setActions([]);
     } else {
       setSelectedMethod('');
       setParameterValues({});
+      setActions([]);
     }
   }, [methodDefinitions, selectedFileId]);
 
@@ -58,37 +66,71 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
   const handleMethodChange = (method: string) => {
     setSelectedMethod(method);
     setParameterValues({}); // Clear parameter values when switching methods
+    setActions([]);
   };
 
   const updateParameterValue = (paramName: string, value: string) => {
     setParameterValues(prev => ({ ...prev, [paramName]: value }));
   };
 
+  const addAction = (type: 'deposit' | 'withdrawal') => {
+    setActions(prev => [...prev, { id: Date.now().toString(), type, tokenId: '00', amount: '' }]);
+  };
+
+  const updateAction = (id: string, field: keyof Action, value: string) => {
+    setActions(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+
+  const removeAction = (id: string) => {
+    setActions(prev => prev.filter(a => a.id !== id));
+  };
+
   // Predefined caller addresses for testing (25 bytes = 50 hex characters for Address)
   // All addresses must be exactly 50 hex characters (0-9, a-f)
   const callerAddresses = {
-    alice: 'a1b2c3d4e5f6789012345678901234567890abcdef12345678',
-    bob: 'b2c3d4e5f67890123456789012345678901abcdef234567890',
-    charlie: 'c3d4e5f678901234567890123456789012abcdef3456789a',
-    owner: 'f0e1d2c3b4a59876543210987654321098765432109876543',
+    Alice: 'HMDhngejVRvLTTdFYMHMSpHACG1xqTVAVf',
+    Bob: 'H8A264ZmEatQkb4X1RqPbnrXQpU2wKMApx',
+    Charlie: 'HKMXcwTRWuSYEHW3WuWqqsMVHoPaLGoKmf',
+    David: 'HFgg1irSHUDA1HSKXayUCZ8QZaeZ85U38F',
+    owner: 'HQwMgXpvNuYX954RQVkVW4xRniAtc1DG4V',
   };
 
   // Predefined sample values for different Hathor SDK types
   const sampleValues = {
     tokenuid: {
-      htr: '0000000000000000000000000000000000000000000000000000000000000000',
+      htr: '00',
       token_a: '00000943573723a28e3dd980c10e08419d0e00bc647a95f4ca9671ebea7d5669',
       token_b: '000002d4c7e859c6b1ba1bb2a3d59bb1e2d0ff3bb9a5b3b4b5f5e3c9d8e8c9bb',
+      token_c: '0000854b320676bbd60eb7ca46a727fc4da6192d15c6782a23876b6a95c92256',
+      token_d: '0000218fb19e736a546c472a1dfce039658f171ec41f06204795ab031cf7b8c6',
+      token_e: '0000010ef9889a2d2f1a487d680b345f99289dd973468546232debc227ec1b55',
     },
     contractid: {
       contract_1: '000063f99b133c7630bc9d0117919f5b8726155412ad063dbbd618bdc7f85d7a',
       contract_2: '0001b8c4e2d1c3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8',
+      contract_3: '000005ddb7e2cc3893c0406c082285cc73794492e40bbbdedbe1b6fcfc057b5f',
+      contract_4: '000005ec47140ba6f1c7db766154bc2985f1af5435dc25cc7c5d167cd15539e4',
     },
     blueprintid: {
       blueprint_1: '3cb032600bdf7db784800e4ea911b10676fa2f67591f82bb62628c234e771595',
       blueprint_2: '4dc143711cef8ec895911f5fb822c21787fa3f78502f93cc73739d345f882606',
+      blueprint_3: '000006d8a2c2fd50ee9a44fe2092f8a0ee12fd82a28bef5672dac56c38dde82a',
+      blueprint_4: '0000085a6c3d058d11d7e40010cc368707cbd9164a5187779ab797b6ff1d9131',
     },
   };
+
+  const _truncateAddress = (address: string) => {
+    const start = address.substring(0, 6);
+    const end = address.substring(address.length - 6);
+    return `${start}...${end}`;
+  }
+
+  const _truncateId = (id: string) => {
+    if (id === '00') return id;
+    const start = id.substring(0, 8);
+    const end = id.substring(id.length - 8);
+    return `${start}...${end}`;
+  }
 
   const handleExecute = async () => {
     if (!activeFile) {
@@ -103,21 +145,21 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
       let contractIdToUse: string | undefined;
 
       if (selectedMethod === 'initialize') {
-        addConsoleMessage('info', `Compiling and initializing ${activeFile.name}...`);
+        addConsoleMessage('info', `Deploying ${activeFile.name}...`);
         const compileResult = await contractsApi.compile({
           code: activeFile.content,
           blueprint_name: activeFile.name.replace('.py', ''),
         });
 
         if (!compileResult.success || !compileResult.blueprint_id) {
-          addConsoleMessage('error', 'Compilation failed');
+          addConsoleMessage('error', 'Deploy failed');
           compileResult.errors.forEach((error) => {
             addConsoleMessage('error', error);
           });
           setIsExecuting(false);
           return;
         }
-        addConsoleMessage('success', `✅ Successfully compiled ${activeFile.name}`);
+        addConsoleMessage('success', `✅ Successfully deployed ${activeFile.name}`);
         addConsoleMessage('info', `Blueprint ID: ${compileResult.blueprint_id}`);
         blueprintIdToUse = compileResult.blueprint_id;
         contractIdToUse = compileResult.blueprint_id; // For initialize, contractId is the blueprintId
@@ -160,6 +202,8 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
               return callerAddresses[value as keyof typeof callerAddresses];
             }
             return value;
+          } else if (param.type === 'tokenuid' && value === '00') {
+            return value;
           } else if (param.type === 'tokenuid' || param.type === 'contractid' || param.type === 'blueprintid' || param.type === 'vertexid') {
             const finalValue = value || '';
             if (finalValue && (!/^[0-9a-fA-F]{64}$/.test(finalValue))) {
@@ -197,6 +241,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
         caller_address: callerAddresses[selectedCaller as keyof typeof callerAddresses],
         method_type: currentMethod?.decorator,
         code: activeFile?.content,
+        actions: actions.map(a => ({ ...a, amount: Math.round(parseFloat(a.amount) * 100) }))
       });
 
       // Save execution logs from Pyodide to store
@@ -209,6 +254,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
 
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
+        setActions([]);
 
         if (selectedMethod === 'initialize' && result.result && typeof result.result === 'object' && 'contract_id' in result.result) {
           const newContractId = (result.result as any).contract_id;
@@ -228,7 +274,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
       } else {
         const errorMessage = result.error || 'Unknown error occurred';
         addConsoleMessage('error', `❌ Method execution failed:`);
-        
+
         if (errorMessage.includes('AttributeError')) {
           addConsoleMessage('error', `  → ${errorMessage}`);
           if (errorMessage.includes('cannot set a container field')) {
@@ -274,7 +320,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
             <span className="text-green-400">✅ Contract Initialized</span>
             <div className="text-green-300 text-xs mt-1">
               <div>Name: {contractInstance.contractName}</div>
-              <div>ID: {contractInstance.contractId.slice(0, 16)}...</div>
+              <div>ID: {_truncateId(contractInstance.contractId)}</div>
               <div>Created: {contractInstance.timestamp.toLocaleTimeString()}</div>
             </div>
           </div>
@@ -306,13 +352,10 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
           >
             {Object.keys(callerAddresses).map((name) => (
               <option key={name} value={name}>
-                {name} ({callerAddresses[name as keyof typeof callerAddresses].slice(0, 8)}...)
+                {name} ({_truncateAddress(callerAddresses[name as keyof typeof callerAddresses])})
               </option>
             ))}
           </select>
-          <div className="text-xs text-gray-400 mb-4">
-            Full: {callerAddresses[selectedCaller as keyof typeof callerAddresses]}
-          </div>
         </div>
 
         <div>
@@ -348,7 +391,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
                 <option value="">Select address...</option>
                 {Object.keys(callerAddresses).map((name) => (
                   <option key={name} value={name}>
-                    {name} ({callerAddresses[name as keyof typeof callerAddresses].slice(0, 8)}...)
+                    {name} ({_truncateAddress(callerAddresses[name as keyof typeof callerAddresses])})
                   </option>
                 ))}
               </select>
@@ -362,7 +405,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
                   <option value="">Select token UID or enter custom...</option>
                   {Object.entries(sampleValues.tokenuid).map(([name, uid]) => (
                     <option key={name} value={uid}>
-                      {name.toUpperCase()} ({uid.slice(0, 8)}...)
+                      {name.toUpperCase()} ({_truncateId(uid)})
                     </option>
                   ))}
                 </select>
@@ -387,7 +430,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
                   <option value="">Select contract ID or enter custom...</option>
                   {Object.entries(sampleValues.contractid).map(([name, id]) => (
                     <option key={name} value={id}>
-                      {name.replace('_', ' ').toUpperCase()} ({id.slice(0, 8)}...)
+                      {name.replace('_', ' ').toUpperCase()} ({_truncateId(id)})
                     </option>
                   ))}
                 </select>
@@ -412,7 +455,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
                   <option value="">Select blueprint ID or enter custom...</option>
                   {Object.entries(sampleValues.blueprintid).map(([name, id]) => (
                     <option key={name} value={id}>
-                      {name.replace('_', ' ').toUpperCase()} ({id.slice(0, 8)}...)
+                      {name.replace('_', ' ').toUpperCase()} ({_truncateId(id)})
                     </option>
                   ))}
                 </select>
@@ -470,16 +513,59 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ onRunTests }) =>
           </div>
         ))}
 
+        {/* Actions Section */}
+        <div className="space-y-2">
+          <h4 className="text-md font-semibold text-gray-300">Actions</h4>
+          {actions.map((action, index) => (
+            <div key={action.id} className="flex items-center gap-2 p-2 border border-gray-700 rounded">
+              <div className="flex-1 space-y-2">
+                <div className="text-sm font-medium text-gray-400 capitalize">{action.type}</div>
+                <select
+                  value={action.tokenId}
+                  onChange={(e) => updateAction(action.id, 'tokenId', e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
+                >
+                  {Object.entries(sampleValues.tokenuid).map(([name, uid]) => (
+                    <option key={name} value={uid}>
+                      {name.toUpperCase()} ({_truncateId(uid)})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  value={action.amount}
+                  onChange={(e) => updateAction(action.id, 'amount', e.target.value)}
+                  placeholder="Amount"
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                  step="0.01"
+                  min="0"
+                  onWheel={(e) => e.currentTarget.blur()}
+                />
+              </div>
+              <button onClick={() => removeAction(action.id)} className="p-1 text-gray-400 hover:text-white">
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <button onClick={() => addAction('deposit')} className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300">
+              <Plus size={14} /> Add Deposit
+            </button>
+            <button onClick={() => addAction('withdrawal')} className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300">
+              <Plus size={14} /> Add Withdrawal
+            </button>
+          </div>
+        </div>
+
         {/* Execute Method Button */}
         {activeFile?.type !== 'test' && (
           <button
             onClick={handleExecute}
             disabled={isExecuting || isCompiling || isRunningTests}
-            className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
-              isExecuting || isCompiling || isRunningTests
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${isExecuting || isCompiling || isRunningTests
                 ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
                 : 'bg-green-600 text-white hover:bg-green-700'
-            }`}
+              }`}
           >
             {isExecuting ? (
               <Loader2 size={16} className="animate-spin" />

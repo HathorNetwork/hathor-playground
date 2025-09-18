@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelHandle } from 'react-resizable-panels';
-import { EditorTabs } from './Editor/EditorTabs';
 import { CodeEditor } from './Editor/CodeEditor';
 import { Console } from './Console/Console';
 import { Toolbar } from './Toolbar/Toolbar';
@@ -13,6 +12,9 @@ import { contractsApi, validationApi } from '@/lib/api';
 import { LeftSidebarContent } from './LeftSidebar/LeftSidebarContent';
 import { Files, Play, Beaker } from 'lucide-react';
 import { clsx } from 'clsx';
+import dynamic from 'next/dynamic';
+
+const EditorTabs = dynamic(() => import('./Editor/EditorTabs').then(mod => mod.EditorTabs), { ssr: false });
 
 export function IDE() {
   
@@ -108,19 +110,19 @@ export function IDE() {
     }
   };
 
-  const handleRunTests = async () => {
-    if (!activeFile || activeFile.type !== 'test') return;
+  const handleRunTests = async (file: File) => {
+    if (!file || file.type !== 'test') return;
 
     setIsRunningTests(true);
-    addConsoleMessage('info', `Running tests from ${activeFile.name}...`);
+    addConsoleMessage('info', `Running tests from ${file.name}...`);
 
     try {
       const { validateTestBlueprints, combineCodeForTesting } = await import('../utils/testParser');
       const { pyodideRunner } = await import('../lib/pyodide-runner');
       
-      const contractFiles = files.filter(file => file.type !== 'test');
+      const contractFiles = files.filter(f => f.type !== 'test');
       
-      const validation = validateTestBlueprints(activeFile, contractFiles);
+      const validation = validateTestBlueprints(file, contractFiles);
       
       if (!validation.isValid) {
         validation.errors.forEach(error => {
@@ -129,9 +131,9 @@ export function IDE() {
         return;
       }
       
-      const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
+      const combinedCode = combineCodeForTesting(contractFiles, file, validation.references);
       
-      const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
+      const testResult = await pyodideRunner.runTests(combinedCode, file.name);
       
       // Save test execution logs to store
       if (testResult.output) {

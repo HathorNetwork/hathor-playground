@@ -319,6 +319,9 @@ os.makedirs('${dirPath}', exist_ok=True)
   }
 
   private async setupPythonEnvironment(): Promise<void> {
+    // Load common helper functions from shared utilities
+    await this.pyodide.runPython(getHathorHelpers());
+
     // Set up Python environment with real Hathor modules
     await this.pyodide.runPython(`
 import sys
@@ -328,24 +331,11 @@ try:
     import hathor
     import hathor.version
     import hathor.types
-
     import hathor.nanocontracts
     from hathor.nanocontracts.blueprint import Blueprint
     from hathor.nanocontracts.context import Context
+    from hathor.nanocontracts.types import Amount, Address, TokenUid, ContractId, VertexId, public, view
     print("✓ Basic nanocontracts imports successful")
-
-    import hathor.nanocontracts.types as nc_types
-    print("✓ hathor.nanocontracts.types imported")
-
-    # Import specific types
-    Amount = nc_types.Amount
-    Address = nc_types.Address
-    ContractId = nc_types.ContractId
-    TokenUid = nc_types.TokenUid
-    VertexId = nc_types.VertexId
-    Timestamp = nc_types.Timestamp
-
-    print("✓ Types ready for explicit imports in user code")
 
     print("✓ hathor.nanocontracts setup completed")
 except ImportError as e:
@@ -363,7 +353,6 @@ try:
     from hathor.nanocontracts.runner.runner import Runner
     from hathor.nanocontracts.storage.backends import MemoryNodeTrieStore
     from hathor.nanocontracts.storage.factory import NCStorageFactory
-    print("✓ Runner imported successfully")
 
     # Create global runner instance with memory storage
     try:
@@ -374,8 +363,6 @@ try:
         node_store = MemoryNodeTrieStore()
         trie = PatriciaTrie(node_store)
         block_storage = NCBlockStorage(trie)
-        # TODO ok to use dummy seed or should we use proper one?
-        seed = bytes(32)  # Dummy seed
 
         storage_factory = NCStorageFactory()
         nc_runner = Runner(
@@ -384,13 +371,14 @@ try:
             tx_storage=tx_storage,
             storage_factory=storage_factory,
             block_storage=block_storage,
-            seed=seed
+            seed=_gen_random_bytes(32)
         )
 
         # Make runner globally available for tests
         import builtins
         builtins.nc_runner = nc_runner
         globals()['nc_runner'] = nc_runner
+        globals()['settings'] = settings
 
         print("✓ Runner instance created and made globally available")
     except Exception as e:
@@ -403,19 +391,16 @@ try:
         globals()['nc_runner'] = None
 
 except ImportError as e:
-    print(f"❌ Failed to import Runner: {e}")
+    print(f"❌ Failed to create Runner: {e}")
     raise e
 
-# Helper functions are now loaded from shared utilities
-
-print("✅ Real Hathor SDK environment loaded successfully")
+print("✅ Hathor SDK environment loaded successfully")
 `);
-
-    // Load common helper functions from shared utilities
-    await this.pyodide.runPython(getHathorHelpers());
   }
 
   async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string }> {
+    // XXX Not really compiling, but will leave named like this so we don't
+    // need to change everything. We are basically deploying an on-chain blueprint.
     if (!this.pyodide) {
       await this.initialize();
       if (!this.pyodide) throw new Error('Failed to initialize Pyodide');
@@ -432,54 +417,7 @@ print("✅ Real Hathor SDK environment loaded successfully")
       const result = this.pyodide.runPython(`
 print("🚀 Starting contract compilation...")
 try:
-    # Test if the contract can import what it needs
-    print("🔍 Testing basic Hathor imports...")
-
-    try:
-        from hathor.nanocontracts.blueprint import Blueprint
-        print("✅ Blueprint import works")
-    except Exception as e:
-        print(f"❌ Blueprint import failed: {e}")
-        raise
-
-    try:
-        from hathor.nanocontracts.context import Context
-        print("✅ Context import works")
-    except Exception as e:
-        print(f"❌ Context import failed: {e}")
-        raise
-
-    try:
-        from hathor.nanocontracts.types import Amount, Address, TokenUid, ContractId, VertexId, public, view
-        print(f"✅ Types import works - Amount: {Amount}, Address: {Address}, TokenUid: {TokenUid}")
-        print(f"✅ Decorators import works - public: {public}, view: {view}")
-    except Exception as e:
-        print(f"❌ Types/decorators import failed: {e}")
-        raise
-
-    # If we get here, imports work - let the contract import what it needs
-    print("✅ All basic imports working, executing contract with full globals access")
-
-    # Use the current globals so the contract's imports are available for type annotations
-    exec_globals = globals()
-    exec_locals = {}
-
-    # Execute the contract code - imports and type annotations will work
-    exec('''${parsedCode}''', exec_globals, exec_locals)
-
-    # Find the blueprint class
-    blueprint_class = None
-    if '__blueprint__' in exec_locals:
-        blueprint_class = exec_locals['__blueprint__']
-    else:
-        # Look for Blueprint subclasses
-        for name, obj in exec_locals.items():
-            if hasattr(obj, '__bases__') and any('Blueprint' in base.__name__ for base in obj.__bases__):
-                blueprint_class = obj
-                break
-
-    if blueprint_class is None:
-        raise Exception("No Blueprint class found. Make sure to export your class as __blueprint__")
+    # TODO check blueprint code has __blueprint__ =
 
     # Create and save OnChainBlueprint transaction
     try:
@@ -540,14 +478,14 @@ json.dumps(result)
     }
   }
 
-  async executeContract(request: ExecutionRequest): Promise<ExecutionResult> {
+  async executeContract(request: any): Promise<ExecutionResult> {
     if (!this.pyodide) {
       await this.initialize();
       if (!this.pyodide) throw new Error('Failed to initialize Pyodide');
     }
 
     try {
-      const { method_name, args, caller_address, code } = request;
+      const { method_name, args, caller_address, code, actions } = request;
       let { contract_id } = request;
 
       // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)
@@ -558,19 +496,12 @@ json.dumps(result)
         contract_id = this.generateId();
         // blueprint_id stays as the original contract_id (which was blueprint_id)
       }
-      // Determine method type by parsing the contract code
-      let methodType: 'public' | 'view' | null = null;
+
       if (!code) {
         return { success: false, error: 'Contract code is required for method execution' };
       }
-
-      methodType = this.getMethodType(code, method_name);
-      if (!methodType) {
-        return {
-          success: false,
-          error: `Method '${method_name}' is not decorated with @public or @view`
-        };
-      }
+      // Determine method type by parsing the contract code
+      const methodType = this.getMethodType(code, method_name)
 
       // Execute the method using real Runner
       const result = this.pyodide.runPython(`
@@ -581,7 +512,8 @@ try:
         print("🚀 Using real Runner for execution")
 
         # Create context
-        context = _create_context(caller_address_hex='${caller_address}')
+        actions_list = _create_actions('''${JSON.stringify(actions || [])}''')
+        context = _create_context(caller_address='${caller_address}', actions=actions_list)
 
         # Convert arguments and kwargs from JSON to Python objects
         args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(request.kwargs)}''')
@@ -595,10 +527,7 @@ try:
             # Initialize new contract
             print(f"🏗️ Initializing contract with args: {args}")
 
-            # Use the real runner to initialize the contract
-            from hathor.nanocontracts.types import Address
-            caller_address = Address(_create_address_from_hex('${caller_address}'))
-
+            # Use the runner to initialize the contract
             nc_runner.create_contract(
                 contract_id,
                 blueprint_id,
@@ -615,7 +544,7 @@ try:
 
         else:
             # Execute method on existing contract
-            print(f"⚡ Executing method {method_name} with args {args} kwargs {kwargs}, type ${methodType}")
+            print(f"⚡ Executing method {method_name} with args {args} kwargs {kwargs}, type {method_type}")
 
             if method_type == 'public':
                 # Use call_public_method for @public methods
@@ -640,7 +569,7 @@ try:
             execution_result = {
                 'success': True,
                 'result': result_value,
-                'output': f'Method {method_name} executed successfully using real Runner (${methodType})'
+                'output': f'Method {method_name} executed successfully using real Runner ({method_type})'
             }
 
     else:
@@ -649,11 +578,10 @@ try:
 except Exception as e:
     import traceback
     traceback_str = traceback.format_exc()
-    print(f"❌ Method execution exception: {e}")
-    print(f"❌ Full execution traceback: {traceback_str}")
+    print(f"❌ Method execution traceback: {traceback_str}")
     execution_result = {
         'success': False,
-        'error': str(e),
+        'error': e.__class__.__name__,
         'traceback': traceback_str
     }
 
@@ -731,9 +659,11 @@ json.dumps(validation_result)
   }
 
   private generateId(): string {
-    return Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(32)))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
+    // make sure ids start with 0000...
+    return '0000' + id.slice(4);
   }
 
   /**
@@ -746,12 +676,12 @@ json.dumps(validation_result)
       const line = lines[i].trim();
 
       // Look for @public or @view decorators
-      if (line === '@public' || line === '@view') {
+      if (line.startsWith('@public') || line.startsWith('@view')) {
         // Check the next few lines for the method definition
         for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
           const nextLine = lines[j].trim();
           if (nextLine.startsWith(`def ${methodName}(`)) {
-            return line === '@public' ? 'public' : 'view';
+            return line.startsWith('@public') ? 'public' : 'view';
           }
           // Skip empty lines and other decorators
           if (nextLine && !nextLine.startsWith('@') && !nextLine.startsWith('def')) {
@@ -819,7 +749,6 @@ try:
 
     # Try to execute it to check for syntax errors
     compile(test_code, '${testFileName}', 'exec')
-
 
     # Run pytest and capture its output
     sys.stdout = captured_output

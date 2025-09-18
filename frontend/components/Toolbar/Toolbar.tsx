@@ -1,7 +1,10 @@
 'use client';
 
 import React from 'react';
-import { FileCode, Settings, HelpCircle } from 'lucide-react';
+import { FileCode } from 'lucide-react';
+import packageJson from '../../package.json';
+
+const hathorCoreReference = packageJson['hathor-core-reference'];
 
 interface ToolbarProps {
   fileName?: string;
@@ -16,29 +19,23 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <div className="flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <FileCode size={20} className="text-hathor-500" />
-            <span className="text-white font-bold">Hathor Nano Contracts IDE</span>
+            <img src="/logo.png" alt="Hathor Playground Logo" className="h-8 w-8" />
+            <span className="text-white font-bold font-satisfy text-[30px] pt-2 pl-3">Hathor Playground</span>
           </div>
-
-          
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Settings Button */}
-          <button
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
-            title="Settings"
-          >
-            <Settings size={18} />
-          </button>
-
-          {/* Help Button */}
-          <button
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
-            title="Help"
-          >
-            <HelpCircle size={18} />
-          </button>
+          <span className="text-gray-400 text-xs font-mono">
+            hathor-core:{" "}
+            <a
+              href={`https://github.com/HathorNetwork/hathor-core/tree/${hathorCoreReference}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white transition-colors"
+            >
+              {hathorCoreReference}
+            </a>
+          </span>
         </div>
       </div>
     </div>
