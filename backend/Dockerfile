@@ -5,17 +5,16 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV POETRY_NO_INTERACTION=1
-ENV POETRY_VENV_IN_PROJECT=1
-ENV POETRY_CACHE_DIR=/opt/poetry-cache
+ENV POETRY_VIRTUALENVS_CREATE=false
 ENV POETRY_HOME="/opt/poetry"
 ENV POETRY_VERSION=1.8.3
+ENV PATH="/opt/poetry/bin:${PATH}"
 
 # Install system dependencies including Poetry
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
     && curl -sSL https://install.python-poetry.org | python3 - \
-    && ln -s /opt/poetry/bin/poetry /usr/local/bin/poetry \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
@@ -24,17 +23,17 @@ WORKDIR /app
 # Copy Poetry configuration files
 COPY pyproject.toml poetry.lock ./
 
-# Configure Poetry and install dependencies
-RUN poetry config virtualenvs.create false \
-    && poetry install --only=main --no-root \
-    && rm -rf /opt/poetry-cache
+# Install dependencies directly to system Python
+RUN poetry install --only=main --no-root
 
 # Copy application code
 COPY . .
 
-# Create non-root user
+# Create non-root user and give ownership
 RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
+    && chown -R app:app /app \
+    && mkdir -p /home/app/.cache \
+    && chown -R app:app /home/app
 USER app
 
 # Set default environment variables for rate limiting
@@ -55,4 +54,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
-CMD ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
