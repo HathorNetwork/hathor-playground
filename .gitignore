@@ -3,3 +3,24 @@ backend/.env
 *.tar.gz
 .direnv/
 .claude/settings.local.json
+
+# Python
+*.py[cod]
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.venv
+venv/
+ENV/
