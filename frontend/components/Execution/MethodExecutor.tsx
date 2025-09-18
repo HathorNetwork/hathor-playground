@@ -22,7 +22,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
   const [selectedCaller, setSelectedCaller] = useState<string>('Alice');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
-  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
+  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests, setLastExecutionLogs } = useIDEStore();
 
   const contractFiles = files.filter((f) => f.type === 'contract');
 
@@ -44,7 +44,6 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
 
   // Get contract instance from store (persisted across address changes)
   const contractInstance = activeFile ? contractInstances[activeFile.id] : null;
-  const contractId = contractInstance?.contractId;
 
   // Reset method selection when switching files and set default method
   useEffect(() => {
@@ -563,8 +562,8 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
             onClick={handleExecute}
             disabled={isExecuting || isCompiling || isRunningTests}
             className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${isExecuting || isCompiling || isRunningTests
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-green-600 text-white hover:bg-green-700'
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-green-600 text-white hover:bg-green-700'
               }`}
           >
             {isExecuting ? (

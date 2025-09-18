@@ -483,8 +483,8 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
         # Add execution logs from Pyodide if available using XML structure
         if request.execution_logs:
             context_parts.append(
-                f"\n<execution_logs>\n{
-                    request.execution_logs}\n</execution_logs>"
+                f"\n<execution_logs>\n{request.execution_logs}\n"
+                f"</execution_logs>"
             )
 
         # Add any additional context

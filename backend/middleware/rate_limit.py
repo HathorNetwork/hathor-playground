@@ -48,8 +48,9 @@ def get_redis_connection():
         )
     except Exception as e:
         # Fallback to in-memory if Redis is not available
-        logger.warning(f"Redis connection failed: {
-                       e}, using in-memory rate limiting")
+        logger.warning(
+            f"Redis connection failed: {e}, using in-memory rate limiting"
+        )
         return None
 
 
