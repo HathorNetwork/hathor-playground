@@ -331,10 +331,10 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
               )}
 
               {/* Diff Viewer */}
-              {message.originalCode && message.modifiedCode && activeFile && (
+              {message.modifiedCode && activeFile && (
                 <div className="mt-3">
                   <DiffViewer
-                    originalCode={message.originalCode}
+                    originalCode={message.originalCode || activeFile.content || ''}
                     modifiedCode={message.modifiedCode}
                     fileName={activeFile.name}
                     onApply={(modifiedCode) => handleApplyDiff(modifiedCode, message.id)}
