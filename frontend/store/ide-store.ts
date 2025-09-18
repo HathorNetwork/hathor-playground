@@ -828,7 +828,7 @@ class SwapDemoTestCase(BlueprintTestCase):
         content: file.content,
         lastModified: Date.now(),
         created: Date.now(), // This should ideally come from existing stored file
-        type: file.type,
+        type: file.type || 'contract',
       };
 
       // Check if file exists to preserve created date
