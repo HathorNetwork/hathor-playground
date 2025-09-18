@@ -2,15 +2,41 @@
 AI Assistant API router - handles AI assistant requests
 """
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 import structlog
-import openai
 import os
 import re
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.gemini import GeminiModel
+from middleware.rate_limit import token_tracker
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+def get_ai_model():
+    """Get AI model based on environment configuration"""
+    provider = os.getenv("AI_PROVIDER", "openai").lower()
+
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI API key not configured")
+        # Set the API key in environment for OpenAI
+        os.environ["OPENAI_API_KEY"] = api_key
+        return OpenAIChatModel("gpt-4o-mini")
+    elif provider == "gemini":
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("Google API key not configured")
+        return GeminiModel("gemini-1.5-flash", api_key=api_key)
+    else:
+        raise ValueError(f"Unsupported AI provider: {provider}")
+
+
+# AI agent will be created dynamically in the chat function
 
 
 def extract_modified_code_from_response(
@@ -18,63 +44,73 @@ def extract_modified_code_from_response(
     original_code: str = None
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    Extract modified code from AI response.
+    Extract modified code from AI response using XML parsing.
     Returns (diff_text, original_code, modified_code)
     """
     try:
-        # First, look for properly marked modified code blocks
+        # First, try to extract code from <modified_code> XML tags
+        modified_code_match = re.search(
+            r'<modified_code>(.*?)</modified_code>',
+            response_text,
+            re.DOTALL
+        )
+
+        if modified_code_match:
+            modified_code = modified_code_match.group(1).strip()
+
+            # Remove any code block markers that might be inside the XML
+            if modified_code.startswith('```python'):
+                # Remove opening ```python and closing ```
+                lines = modified_code.split('\n')
+                if lines[0].strip() == '```python':
+                    lines = lines[1:]  # Remove first line
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]  # Remove last line
+                modified_code = '\n'.join(lines)
+            elif modified_code.startswith('```') \
+                    and modified_code.endswith('```'):
+                # Remove any other code block markers
+                lines = modified_code.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                modified_code = '\n'.join(lines)
+
+            logger.info(
+                "Successfully extracted code from <modified_code> XML tag")
+            return None, original_code, modified_code
+
+        # Fallback: look for ```python:modified blocks (legacy support)
         modified_pattern = r'```python:modified\n(.*?)\n```'
         modified_matches = re.findall(
             modified_pattern, response_text, re.DOTALL)
 
-        # If no python:modified blocks found, try regular python blocks
-        if not modified_matches:
-            # Check if the response seems to be providing a code modification
-            modification_indicators = [
-                "here's the updated",
-                "here's the modified",
-                "here's the fixed",
-                "updated code",
-                "modified code",
-                "fixed code",
-                "complete code",
-                "here is the updated",
-                "here is the modified",
-                "here is the fixed"
-            ]
-
-            has_modification_intent = any(
-                indicator in response_text.lower()
-                for indicator in modification_indicators)
-
-            if has_modification_intent:
-                # Try to find regular python blocks
-                regular_pattern = r'```python\n(.*?)\n```'
-                regular_matches = re.findall(
-                    regular_pattern, response_text, re.DOTALL)
-
-                if regular_matches and original_code:
-                    # Use the regular python block as modified code
-                    modified_code = regular_matches[0]
-
-                    # Log warning that AI didn't use proper marker
-                    logger.warning(
-                        "AI used regular python block instead of "
-                        "python:modified marker")
-
-                    # Check if this looks like a complete file
-                    if ("from hathor" in modified_code or
-                            "import" in modified_code or
-                            "class" in modified_code):
-                        return None, original_code, modified_code
-
-        # If we found properly marked modified blocks
-        elif modified_matches and original_code:
-            # Take the first modified code found
+        if modified_matches and original_code:
             modified_code = modified_matches[0]
+            logger.info("Extracted code from python:modified block (legacy)")
             return None, original_code, modified_code
 
+        # Second fallback: regular python blocks if they contain full
+        # contract structure
+        regular_pattern = r'```python\n(.*?)\n```'
+        regular_matches = re.findall(
+            regular_pattern, response_text, re.DOTALL)
+
+        if regular_matches and original_code:
+            modified_code = regular_matches[0]
+            # Check if this looks like a complete contract file
+            if ("from hathor" in modified_code or
+                    "import" in modified_code or
+                    "class" in modified_code or
+                    "__blueprint__" in modified_code):
+                logger.warning(
+                    "Extracted code from regular python block - "
+                    "AI should use <modified_code> XML tags")
+                return None, original_code, modified_code
+
         # No code modifications found
+        logger.debug("No modified code found in response")
         return None, None, None
 
     except Exception as e:
@@ -95,6 +131,7 @@ class ChatRequest(BaseModel):
     current_file_content: Optional[str] = None
     current_file_name: Optional[str] = None
     console_messages: List[str] = Field(default_factory=list)
+    execution_logs: Optional[str] = None  # Logs from Pyodide execution
     context: Optional[Dict[str, Any]] = None
     # Recent conversation history
     conversation_history: List[ChatMessage] = Field(default_factory=list)
@@ -112,10 +149,9 @@ class ChatResponse(BaseModel):
 
 # Hathor-specific system prompt
 HATHOR_SYSTEM_PROMPT = """
-🚨 CRITICAL DIFF GENERATION RULE: When users ask for code changes, fixes,
-improvements, or modifications, you MUST use ```python:modified for the
-complete updated file content. This is mandatory for the IDE diff system
-to work.
+🚨 CRITICAL CODE MODIFICATION RULE: When users ask for code changes, fixes,
+improvements, or modifications, you MUST use XML tags to provide the complete
+updated file content. This is mandatory for the IDE diff system to work.
 
 You are Clippy, a helpful AI assistant for Hathor Nano Contracts development! 📎
 
@@ -355,25 +391,34 @@ You help developers with:
 
 🔥 CODE MODIFICATION (MANDATORY RULE):
 When users request code changes, fixes, improvements, or modifications, you
-MUST use this EXACT format:
+MUST use this EXACT XML format:
 
-```python:modified
+<modified_code>
 # Complete modified file content here
 from hathor.nanocontracts.blueprint import Blueprint
 # ... all the updated code ...
 __blueprint__ = ClassName
-```
+</modified_code>
 
-TRIGGER WORDS requiring python:modified:
+TRIGGER WORDS requiring <modified_code>:
 "fix", "change", "update", "modify", "improve", "add", "remove", "implement",
 "apply changes", "do the changes", "make the changes"
 
+✅ ALWAYS use <modified_code></modified_code> XML tags for any code the user
+should apply to their file
 ❌ NEVER use regular ```python blocks for code modifications
-✅ ALWAYS use ```python:modified for any code the user should apply to their
-file
+❌ NEVER use ```python:modified blocks (legacy format)
 
-This triggers the IDE's diff viewer - essential for the system to work
-properly!
+The XML format is parsed reliably and triggers the IDE's diff viewer -
+essential for the system to work properly!
+
+📋 STRUCTURED CONTEXT FORMAT:
+When analyzing user context, you may see structured information in XML format:
+- <execution_logs>...</execution_logs> - Recent code execution logs from
+Pyodide
+- <console_messages>...</console_messages> - IDE console output
+- <current_file>...</current_file> - Current file being edited
+Use this structured information to provide better assistance.
 
 Be friendly, helpful, and use appropriate emojis! When you see code issues,
 offer specific suggestions with examples.
@@ -381,31 +426,31 @@ offer specific suggestions with examples.
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_assistant(request: ChatRequest):
+async def chat_with_assistant(request: ChatRequest, http_request: Request):
     """Chat with the AI assistant"""
     try:
         logger.info(
             "AI assistant chat request", message_length=len(request.message)
         )
 
-        # Check if OpenAI API key is configured
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            # Return a mock response if no API key
+        # Check if AI provider is configured
+        try:
+            model = get_ai_model()
+        except ValueError as e:
+            # Return a mock response if no API key is configured
             return ChatResponse(
                 success=True,
                 message=(
                     "Hi! I'm Clippy, your Hathor Nano Contracts "
                     "assistant! 📎\n\n"
                     "I'd love to help you with your nano contracts, but I "
-                    "need an OpenAI API key to be fully functional. "
+                    "need an AI provider API key to be fully functional. "
                     "For now, here are some quick tips:\n\n"
                     "• Always use @public for state-changing methods\n"
                     "• Use @view for read-only methods\n"
                     "• Include type hints for all variables\n"
                     "• Export your class as __blueprint__\n\n"
-                    "Set the OPENAI_API_KEY environment variable to enable "
-                    "full AI assistance!"
+                    f"Error: {str(e)}"
                 ),
                 suggestions=[
                     "Add proper type hints to your contract",
@@ -418,18 +463,29 @@ async def chat_with_assistant(request: ChatRequest):
         # Prepare the context for the AI
         context_parts = [HATHOR_SYSTEM_PROMPT]
 
-        # Add current file context if available
+        # Add current file context if available using XML structure
         if request.current_file_content and request.current_file_name:
             context_parts.append(
-                f"\nCURRENT FILE: {request.current_file_name}\n"
-                f"```python\n{request.current_file_content}\n```"
+                f"\n<current_file name=\"{request.current_file_name}\">\n"
+                f"{request.current_file_content}\n"
+                f"</current_file>"
             )
 
-        # Add console messages if available (recent errors/warnings)
+        # Add console messages if available using XML structure
         if request.console_messages:
             recent_messages = request.console_messages[-5:]  # Last 5 messages
+            messages_xml = "\n".join(
+                f"<message>{msg}</message>" for msg in recent_messages)
             context_parts.append(
-                "\nRECENT CONSOLE MESSAGES:\n" + "\n".join(recent_messages))
+                f"\n<console_messages>\n{messages_xml}\n</console_messages>"
+            )
+
+        # Add execution logs from Pyodide if available using XML structure
+        if request.execution_logs:
+            context_parts.append(
+                f"\n<execution_logs>\n{request.execution_logs}\n"
+                f"</execution_logs>"
+            )
 
         # Add any additional context
         if request.context:
@@ -437,45 +493,72 @@ async def chat_with_assistant(request: ChatRequest):
 
         full_context = "\n".join(context_parts)
 
-        # Call OpenAI API
-        client = openai.OpenAI(api_key=api_key)
+        # Build conversation history for Pydantic AI
+        conversation_messages = []
 
-        # Build messages array with conversation history
-        messages = [{"role": "system", "content": full_context}]
-
-        # Add recent conversation history
-        # (limit to last 6 messages to stay within token limits)
+        # Add recent conversation history (limit to last 6 messages)
         recent_history = (
             request.conversation_history[-6:]
             if request.conversation_history else []
         )
         for msg in recent_history:
-            messages.append({"role": msg.role, "content": msg.content})
+            conversation_messages.append(f"{msg.role}: {msg.content}")
 
         # Add current message
-        messages.append({"role": "user", "content": request.message})
+        conversation_messages.append(f"user: {request.message}")
 
-        response = client.chat.completions.create(
-            # Use the more affordable model
-            model="gpt-4o-mini",
-            messages=messages,
-            # Increased to ensure complete code responses
-            max_tokens=2000,
-            # Lower temperature for more consistent formatting
-            temperature=0.3
+        # Create conversation context
+        conversation_context = "\n\n".join(
+            conversation_messages) if conversation_messages \
+            else request.message
+
+        # Use Pydantic AI agent with dynamic system prompt
+        agent = Agent(
+            model=model,
+            system_prompt=full_context
         )
 
-        assistant_message = response.choices[0].message.content
+        # Run the AI agent
+        result = await agent.run(conversation_context)
+        assistant_message = result.output
+
+        # Log token usage for rate limiting and cost tracking
+        usage_info = getattr(result, 'usage', None)
+        if usage_info:
+            total_tokens = getattr(usage_info, 'total_tokens', 0)
+            input_tokens = getattr(usage_info, 'prompt_tokens', 0)
+            output_tokens = getattr(usage_info, 'completion_tokens', 0)
+
+            # Log actual token usage to rate limiter
+            client_ip = http_request.client.host
+            if http_request.headers.get("x-forwarded-for"):
+                client_ip = http_request.headers.get(
+                    "x-forwarded-for").split(",")[0].strip()
+
+            # Log actual token usage if different from estimation
+            estimated_tokens = len(
+                conversation_context) // 4 + 100  # Rough estimation
+            if total_tokens != estimated_tokens:
+                # Adjust token tracking if significantly different
+                adjustment = total_tokens - estimated_tokens
+                if abs(adjustment) > 50:  # Only adjust for significant diff
+                    await token_tracker.consume_tokens(client_ip, adjustment)
+
+            logger.info(
+                "AI request completed",
+                provider=os.getenv("AI_PROVIDER", "openai"),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                estimated_tokens=estimated_tokens,
+                client_ip=client_ip
+            )
 
         # Debug log the assistant response
         logger.info(f"AI response preview: {assistant_message[:200]}...")
         logger.info(
-            f"Response contains python:modified: "
-            f"{('```python:modified' in assistant_message)}"
-        )
-        logger.info(
-            f"Response contains regular python: "
-            f"{('```python' in assistant_message)}"
+            f"Response contains <modified_code>: "
+            f"{('<modified_code>' in assistant_message)}"
         )
 
         # Extract modified code if present
@@ -500,7 +583,9 @@ async def chat_with_assistant(request: ChatRequest):
             any(
                 "error" in msg.lower()
                 for msg in request.console_messages
-            )
+            ) or
+            (request.execution_logs and "error" in
+             request.execution_logs.lower())
         ):
             suggestions.extend([
                 "Check your method decorators (@public/@view)",

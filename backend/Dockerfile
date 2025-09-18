@@ -1,40 +1,51 @@
-# Backend Dockerfile
+# Backend Dockerfile - Hathor Nano Contracts IDE API
 FROM python:3.11-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV POETRY_NO_INTERACTION=1
+ENV POETRY_VENV_IN_PROJECT=1
+ENV POETRY_CACHE_DIR=/opt/poetry-cache
+ENV POETRY_HOME="/opt/poetry"
+ENV POETRY_VERSION=1.8.3
 
-# Install system dependencies including RocksDB
+# Install system dependencies including Poetry
 RUN apt-get update && apt-get install -y \
-    build-essential \
+    gcc \
     curl \
-    git \
-    librocksdb-dev \
-    libsnappy-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    liblz4-dev \
-    libzstd-dev \
+    && curl -sSL https://install.python-poetry.org | python3 - \
+    && ln -s /opt/poetry/bin/poetry /usr/local/bin/poetry \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
-COPY nano-contracts-ide/backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy Poetry configuration files
+COPY pyproject.toml poetry.lock ./
 
-# Copy hathor package from parent directory
-COPY hathor ./hathor
+# Configure Poetry and install dependencies
+RUN poetry config virtualenvs.create false \
+    && poetry install --only=main --no-root \
+    && rm -rf /opt/poetry-cache
 
 # Copy application code
-COPY nano-contracts-ide/backend .
+COPY . .
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app \
     && chown -R app:app /app
 USER app
+
+# Set default environment variables for rate limiting
+ENV REDIS_ENABLED=true
+ENV REDIS_URL=redis://redis:6379/0
+ENV RATE_LIMIT_IP_REQUESTS=50
+ENV RATE_LIMIT_GLOBAL_REQUESTS=1000
+ENV RATE_LIMIT_IP_TOKENS=10000
+ENV RATE_LIMIT_GLOBAL_TOKENS=100000
+ENV RATE_LIMIT_WINDOW=3600
+ENV AI_PROVIDER=openai
 
 # Expose port
 EXPOSE 8000
@@ -44,4 +55,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

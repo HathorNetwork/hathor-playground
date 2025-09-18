@@ -7,8 +7,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
+import os
 
 from api.ai_assistant import router as ai_assistant_router
+from middleware.rate_limit import limiter, token_limit_middleware, \
+    rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 # Load environment variables from .env file
 load_dotenv()
@@ -39,13 +43,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Add slowapi to the app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
 # Configure CORS
+cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:3001,http://localhost:3002")\
+    .split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
+    allow_origins=cors_origins + [
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "http://127.0.0.1:3002"
@@ -54,6 +63,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add token-based cost control middleware
+app.middleware("http")(token_limit_middleware)
 
 # Include routers
 app.include_router(

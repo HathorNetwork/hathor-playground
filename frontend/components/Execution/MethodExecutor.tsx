@@ -6,7 +6,7 @@ import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
 
-interface MethodExecutorProps {}
+interface MethodExecutorProps { }
 
 interface Action {
   id: string;
@@ -15,14 +15,14 @@ interface Action {
   amount: string;
 }
 
-export const MethodExecutor: React.FC<MethodExecutorProps> = ({}) => {
+export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedCaller, setSelectedCaller] = useState<string>('Alice');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
-  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests } = useIDEStore();
+  const { addConsoleMessage, files, contractInstances, addContractInstance, isCompiling, isRunningTests, setLastExecutionLogs } = useIDEStore();
 
   const contractFiles = files.filter((f) => f.type === 'contract');
 
@@ -44,7 +44,6 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({}) => {
 
   // Get contract instance from store (persisted across address changes)
   const contractInstance = activeFile ? contractInstances[activeFile.id] : null;
-  const contractId = contractInstance?.contractId;
 
   // Reset method selection when switching files and set default method
   useEffect(() => {
@@ -88,11 +87,11 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({}) => {
   // Predefined caller addresses for testing (25 bytes = 50 hex characters for Address)
   // All addresses must be exactly 50 hex characters (0-9, a-f)
   const callerAddresses = {
-    Alice:    'HMDhngejVRvLTTdFYMHMSpHACG1xqTVAVf',
-    Bob:      'H8A264ZmEatQkb4X1RqPbnrXQpU2wKMApx',
-    Charlie:  'HKMXcwTRWuSYEHW3WuWqqsMVHoPaLGoKmf',
-    David:    'HFgg1irSHUDA1HSKXayUCZ8QZaeZ85U38F',
-    owner:    'HQwMgXpvNuYX954RQVkVW4xRniAtc1DG4V',
+    Alice: 'HMDhngejVRvLTTdFYMHMSpHACG1xqTVAVf',
+    Bob: 'H8A264ZmEatQkb4X1RqPbnrXQpU2wKMApx',
+    Charlie: 'HKMXcwTRWuSYEHW3WuWqqsMVHoPaLGoKmf',
+    David: 'HFgg1irSHUDA1HSKXayUCZ8QZaeZ85U38F',
+    owner: 'HQwMgXpvNuYX954RQVkVW4xRniAtc1DG4V',
   };
 
   // Predefined sample values for different Hathor SDK types
@@ -244,6 +243,14 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({}) => {
         actions: actions.map(a => ({ ...a, amount: Math.round(parseFloat(a.amount) * 100) }))
       });
 
+      // Save execution logs from Pyodide to store
+      if (result.logs && result.logs.length > 0) {
+        setLastExecutionLogs(result.logs.join('\n'));
+      } else if ((result as any).output) {
+        // Fallback to output field if logs is not available
+        setLastExecutionLogs((result as any).output);
+      }
+
       if (result.success) {
         addConsoleMessage('success', `✅ Method '${selectedMethod}' executed successfully`);
         setActions([]);
@@ -284,6 +291,8 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({}) => {
       }
     } catch (error: any) {
       addConsoleMessage('error', `Execution error: ${error.message || error}`);
+      // Clear execution logs on error
+      setLastExecutionLogs(null);
     } finally {
       setIsExecuting(false);
     }
@@ -552,11 +561,10 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({}) => {
           <button
             onClick={handleExecute}
             disabled={isExecuting || isCompiling || isRunningTests}
-            className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${
-              isExecuting || isCompiling || isRunningTests
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-green-600 text-white hover:bg-green-700'
-            }`}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded font-medium transition-colors ${isExecuting || isCompiling || isRunningTests
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
           >
             {isExecuting ? (
               <Loader2 size={16} className="animate-spin" />
