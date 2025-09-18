@@ -2,16 +2,41 @@
 AI Assistant API router - handles AI assistant requests
 """
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel, Field
 import structlog
-import openai
 import os
 import re
-import xml.etree.ElementTree as ET
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.gemini import GeminiModel
+from middleware.rate_limit import token_tracker, limiter
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+def get_ai_model():
+    """Get AI model based on environment configuration"""
+    provider = os.getenv("AI_PROVIDER", "openai").lower()
+
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI API key not configured")
+        # Set the API key in environment for OpenAI
+        os.environ["OPENAI_API_KEY"] = api_key
+        return OpenAIChatModel("gpt-4o-mini")
+    elif provider == "gemini":
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("Google API key not configured")
+        return GeminiModel("gemini-1.5-flash", api_key=api_key)
+    else:
+        raise ValueError(f"Unsupported AI provider: {provider}")
+
+
+# AI agent will be created dynamically in the chat function
 
 
 def extract_modified_code_from_response(
@@ -396,31 +421,31 @@ offer specific suggestions with examples.
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_assistant(request: ChatRequest):
+async def chat_with_assistant(request: ChatRequest, http_request: Request):
     """Chat with the AI assistant"""
     try:
         logger.info(
             "AI assistant chat request", message_length=len(request.message)
         )
 
-        # Check if OpenAI API key is configured
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            # Return a mock response if no API key
+        # Check if AI provider is configured
+        try:
+            model = get_ai_model()
+        except ValueError as e:
+            # Return a mock response if no API key is configured
             return ChatResponse(
                 success=True,
                 message=(
                     "Hi! I'm Clippy, your Hathor Nano Contracts "
                     "assistant! 📎\n\n"
                     "I'd love to help you with your nano contracts, but I "
-                    "need an OpenAI API key to be fully functional. "
+                    "need an AI provider API key to be fully functional. "
                     "For now, here are some quick tips:\n\n"
                     "• Always use @public for state-changing methods\n"
                     "• Use @view for read-only methods\n"
                     "• Include type hints for all variables\n"
                     "• Export your class as __blueprint__\n\n"
-                    "Set the OPENAI_API_KEY environment variable to enable "
-                    "full AI assistance!"
+                    f"Error: {str(e)}"
                 ),
                 suggestions=[
                     "Add proper type hints to your contract",
@@ -453,8 +478,7 @@ async def chat_with_assistant(request: ChatRequest):
         # Add execution logs from Pyodide if available using XML structure
         if request.execution_logs:
             context_parts.append(
-                f"\n<execution_logs>\n{
-                    request.execution_logs}\n</execution_logs>"
+                f"\n<execution_logs>\n{request.execution_logs}\n</execution_logs>"
             )
 
         # Add any additional context
@@ -463,45 +487,71 @@ async def chat_with_assistant(request: ChatRequest):
 
         full_context = "\n".join(context_parts)
 
-        # Call OpenAI API
-        client = openai.OpenAI(api_key=api_key)
+        # Build conversation history for Pydantic AI
+        conversation_messages = []
 
-        # Build messages array with conversation history
-        messages = [{"role": "system", "content": full_context}]
-
-        # Add recent conversation history
-        # (limit to last 6 messages to stay within token limits)
+        # Add recent conversation history (limit to last 6 messages)
         recent_history = (
             request.conversation_history[-6:]
             if request.conversation_history else []
         )
         for msg in recent_history:
-            messages.append({"role": msg.role, "content": msg.content})
+            conversation_messages.append(f"{msg.role}: {msg.content}")
 
         # Add current message
-        messages.append({"role": "user", "content": request.message})
+        conversation_messages.append(f"user: {request.message}")
 
-        response = client.chat.completions.create(
-            # Use the more affordable model
-            model="gpt-4o-mini",
-            messages=messages,
-            # Increased to ensure complete code responses
-            max_tokens=2000,
-            # Lower temperature for more consistent formatting
-            temperature=0.3
+        # Create conversation context
+        conversation_context = "\n\n".join(
+            conversation_messages) if conversation_messages else request.message
+
+        # Use Pydantic AI agent with dynamic system prompt
+        agent = Agent(
+            model=model,
+            system_prompt=full_context
         )
 
-        assistant_message = response.choices[0].message.content
+        # Run the AI agent
+        result = await agent.run(conversation_context)
+        assistant_message = result.output
+
+        # Log token usage for rate limiting and cost tracking
+        usage_info = getattr(result, 'usage', None)
+        if usage_info:
+            total_tokens = getattr(usage_info, 'total_tokens', 0)
+            input_tokens = getattr(usage_info, 'prompt_tokens', 0)
+            output_tokens = getattr(usage_info, 'completion_tokens', 0)
+
+            # Log actual token usage to rate limiter
+            client_ip = http_request.client.host
+            if http_request.headers.get("x-forwarded-for"):
+                client_ip = http_request.headers.get(
+                    "x-forwarded-for").split(",")[0].strip()
+
+            # Log actual token usage if different from estimation
+            estimated_tokens = len(
+                conversation_context) // 4 + 100  # Rough estimation
+            if total_tokens != estimated_tokens:
+                # Adjust token tracking if significantly different
+                adjustment = total_tokens - estimated_tokens
+                if abs(adjustment) > 50:  # Only adjust for significant differences
+                    await token_tracker.consume_tokens(client_ip, adjustment)
+
+            logger.info(
+                "AI request completed",
+                provider=os.getenv("AI_PROVIDER", "openai"),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                estimated_tokens=estimated_tokens,
+                client_ip=client_ip
+            )
 
         # Debug log the assistant response
         logger.info(f"AI response preview: {assistant_message[:200]}...")
         logger.info(
-            f"Response contains python:modified: "
-            f"{('```python:modified' in assistant_message)}"
-        )
-        logger.info(
-            f"Response contains regular python: "
-            f"{('```python' in assistant_message)}"
+            f"Response contains <modified_code>: "
+            f"{('<modified_code>' in assistant_message)}"
         )
 
         # Extract modified code if present
