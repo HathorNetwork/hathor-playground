@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
-import os
 
 from api.ai_assistant import router as ai_assistant_router
 from middleware.rate_limit import limiter, token_limit_middleware, \
@@ -47,18 +46,12 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
-# Configure CORS
-cors_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:3000,http://localhost:3001,http://localhost:3002")\
-    .split(",")
+# Configure CORS - Allow all origins
+logger.info("CORS configured to allow all origins")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins + [
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
