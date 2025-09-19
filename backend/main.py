@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
-import os
 
 from api.ai_assistant import router as ai_assistant_router
 from middleware.rate_limit import limiter, token_limit_middleware, \
