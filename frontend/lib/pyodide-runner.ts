@@ -470,7 +470,12 @@ json.dumps(result)
         return { success: true, blueprint_id };
       } else {
         console.error(`❌ Compilation failed:`, compilationResult.error);
-        return { success: false, error: compilationResult.error };
+        // Include traceback if available
+        const errorResponse: any = { success: false, error: compilationResult.error };
+        if (compilationResult.traceback) {
+          errorResponse.traceback = compilationResult.traceback;
+        }
+        return errorResponse;
       }
     } catch (error) {
       console.error('❌ Compilation error:', error);
