@@ -24,6 +24,7 @@ export interface CompileResponse {
   errors: string[];
   warnings: string[];
   gas_estimate?: number;
+  traceback?: string;
 }
 
 export interface ValidationRequest {
@@ -63,6 +64,7 @@ export interface ExecuteResponse {
   gas_used?: number;
   logs: string[];
   state_changes: Record<string, any>;
+  traceback?: string;
 }
 
 export interface Contract {
@@ -95,7 +97,9 @@ export const contractsApi = {
         blueprint_id: result.blueprint_id,
         errors: result.error ? [result.error] : [],
         warnings: [],
-        gas_estimate: 1000 // Mock gas estimate
+        gas_estimate: 1000, // Mock gas estimate
+        // Pass through traceback for detailed error display
+        ...(result.traceback && { traceback: result.traceback })
       };
     } else {
       // Use backend execution (fallback)
@@ -125,7 +129,9 @@ export const contractsApi = {
         result: result.result,
         error: result.error,
         logs: result.output ? [result.output] : [],
-        state_changes: {}
+        state_changes: {},
+        // Pass through traceback for detailed error display
+        ...(result.traceback && { traceback: result.traceback })
       };
     } else {
       // Use backend execution (fallback)
