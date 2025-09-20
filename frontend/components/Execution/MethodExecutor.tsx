@@ -164,7 +164,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
                 addConsoleMessage('error', line);
               }
             });
-          } else if (compileResult.errors) {
+          } else if (compileResult.errors && compileResult.errors.length > 0) {
             // Save errors as execution log
             setLastExecutionLogs(`Compile errors:\n${compileResult.errors.join('\n')}`);
             
@@ -172,12 +172,12 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
             compileResult.errors.forEach((error) => {
               addConsoleMessage('error', error);
             });
-          } else if (compileResult.error) {
-            // Save single error as execution log
-            setLastExecutionLogs(`Compile error: ${compileResult.error}`);
+          } else if ((compileResult as any).error) {
+            // Save single error as execution log (from pyodide-runner)
+            setLastExecutionLogs(`Compile error: ${(compileResult as any).error}`);
             
             // Fallback to single error message
-            addConsoleMessage('error', compileResult.error);
+            addConsoleMessage('error', (compileResult as any).error);
           }
           
           setIsExecuting(false);
