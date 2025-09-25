@@ -220,7 +220,7 @@ export function IDE() {
         
       </div>
         <PanelGroup direction="horizontal">
-          <Panel ref={leftSidebarPanelRef} collapsible={true} defaultSize={30} minSize={5} maxSize={40}>
+          <Panel ref={leftSidebarPanelRef} collapsible={true} defaultSize={20} minSize={5} maxSize={40}>
             <LeftSidebarContent
               activeTab={activeTab}
             />
