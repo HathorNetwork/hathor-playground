@@ -9,7 +9,8 @@ import os
 import re
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.models.gemini import GeminiModel
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.providers.google import GoogleProvider
 from middleware.rate_limit import token_tracker
 
 logger = structlog.get_logger()
@@ -31,7 +32,8 @@ def get_ai_model():
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("Google API key not configured")
-        return GeminiModel("gemini-1.5-flash", api_key=api_key)
+        provider = GoogleProvider(api_key=api_key)
+        return GoogleModel("gemini-2.5-flash-lite", provider=provider)
     else:
         raise ValueError(f"Unsupported AI provider: {provider}")
 
