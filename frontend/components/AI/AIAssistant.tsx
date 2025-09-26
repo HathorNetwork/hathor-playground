@@ -30,6 +30,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
   const [isLoading, setIsLoading] = useState(false);
   const messageIdCounter = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { 
     files, 
     activeFileId, 
@@ -71,6 +72,13 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [inputMessage]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -222,6 +230,13 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
           chatSessions: state.chatSessions.map(s => s.id === activeChatSessionId ? updatedSession : s)
         }));
       }
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
   };
 
@@ -384,32 +399,34 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
 
       {/* Input */}
       <div className="p-3 border-t border-gray-700 bg-gray-900">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            placeholder="Ask about nano contracts..."
-            className="flex-1 px-3 py-2 text-sm bg-gray-700 text-white border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            disabled={isLoading}
-          />
+        <textarea
+          ref={textareaRef}
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          onKeyDown={handleInputKeyDown}
+          placeholder="Ask about nano contracts..."
+                      className="w-full px-3 py-2 text-sm bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none max-h-40 dark-scrollbar"          disabled={isLoading}
+          rows={1}
+        />
+        <div className="mt-2 flex justify-between items-center">
+          {/* Current file indicator */}
+          {activeFile ? (
+            <div className="text-xs text-gray-400 flex items-center gap-1">
+              📄 Currently viewing: <span className="text-gray-300">{activeFile.name}</span>
+            </div>
+          ) : (
+            <div></div> // Placeholder
+          )}
+
           <button
             onClick={handleSendMessage}
             disabled={!inputMessage.trim() || isLoading}
-            className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-2 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title="Send message"
           >
-            <Send size={16} />
+            <Send size={14} />
           </button>
         </div>
-
-        {/* Current file indicator */}
-        {activeFile && (
-          <div className="mt-2 text-xs text-gray-400 flex items-center gap-1">
-            📄 Currently viewing: <span className="text-gray-300">{activeFile.name}</span>
-          </div>
-        )}
       </div>
     </div>
   );
