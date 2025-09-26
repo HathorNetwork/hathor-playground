@@ -3,7 +3,6 @@
  * Loads Pyodide directly from CDN to avoid webpack issues
  */
 
-import { HATHOR_MODULES } from './hathor-modules';
 import { MockLoader } from './mock-loader';
 import { getHathorHelpers } from '../utils/hathorHelpers';
 
@@ -17,16 +16,7 @@ interface ExecutionResult {
   tests_passed?: number;
   tests_failed?: number;
   failure_details?: string[];
-}
-
-interface ExecutionRequest {
-  contract_id: string;
-  method_name: string;
-  args: any[];
-  kwargs: Record<string, any>;
-  caller_address: string;
-  code?: string; // Contract code to determine method decorators
-  method_type?: string;
+  traceback?: string;
 }
 
 // Global Pyodide interface
@@ -76,7 +66,7 @@ class PyodideRunner {
     }
   }
 
-  private async loadPyodideScript(version: string, baseUrl: string): Promise<void> {
+  private async loadPyodideScript(_version: string, baseUrl: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = `${baseUrl}pyodide.js`;
@@ -398,7 +388,7 @@ print("✅ Hathor SDK environment loaded successfully")
 `);
   }
 
-  async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string }> {
+  async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string; traceback?: string }> {
     // XXX Not really compiling, but will leave named like this so we don't
     // need to change everything. We are basically deploying an on-chain blueprint.
     if (!this.pyodide) {
@@ -453,9 +443,16 @@ except Exception as e:
     traceback_str = traceback.format_exc()
     print(f"❌ Contract compilation exception: {e}")
     print(f"❌ Full traceback: {traceback_str}")
+    
+    # Get the full error message with proper fallback
+    error_msg = str(e)
+    # If str(e) is empty, use the class name as fallback
+    if not error_msg or error_msg == '':
+        error_msg = f"{e.__class__.__name__}: {repr(e)}"
+    
     result = {
         'success': False,
-        'error': str(e),
+        'error': error_msg,
         'traceback': traceback_str
     }
 
@@ -470,7 +467,12 @@ json.dumps(result)
         return { success: true, blueprint_id };
       } else {
         console.error(`❌ Compilation failed:`, compilationResult.error);
-        return { success: false, error: compilationResult.error };
+        // Include traceback if available
+        const errorResponse: any = { success: false, error: compilationResult.error };
+        if (compilationResult.traceback) {
+          errorResponse.traceback = compilationResult.traceback;
+        }
+        return errorResponse;
       }
     } catch (error) {
       console.error('❌ Compilation error:', error);
@@ -579,9 +581,16 @@ except Exception as e:
     import traceback
     traceback_str = traceback.format_exc()
     print(f"❌ Method execution traceback: {traceback_str}")
+    
+    # Get the full error message with proper fallback
+    error_msg = str(e)
+    # If str(e) is empty, use the class name as fallback
+    if not error_msg or error_msg == '':
+        error_msg = f"{e.__class__.__name__}: {repr(e)}"
+    
     execution_result = {
         'success': False,
-        'error': e.__class__.__name__,
+        'error': error_msg,
         'traceback': traceback_str
     }
 
