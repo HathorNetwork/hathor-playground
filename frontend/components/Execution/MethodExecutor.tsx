@@ -6,6 +6,22 @@ import { useIDEStore, File, ContractInstance } from '@/store/ide-store';
 import { contractsApi } from '@/lib/api';
 import { parseContractMethods, MethodDefinition } from '@/utils/contractParser';
 
+const parseNCFailStackTrace = (traceback: string): string => {
+  const lines = traceback.split('\n');
+  for (let i = 0; i < lines.length - 2; i++) {
+    const line1 = lines[i];
+    const line2 = lines[i+1];
+    if (line1.includes('File "<blueprint>"') && line2.includes('File "<blueprint>"')) {
+      // Found two consecutive lines with "<blueprint>".
+      // The stacktrace should be reduced to just the second of these lines and the one after that.
+      return `${lines[i+1].trim()}\n${lines[i+2].trim()}`;
+    }
+  }
+
+  // If the specific pattern is not found, return the original traceback.
+  return traceback;
+};
+
 interface MethodExecutorProps { }
 
 interface Action {
@@ -152,14 +168,14 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
 
         if (!compileResult.success || !compileResult.blueprint_id) {
           addConsoleMessage('error', '❌ Deploy failed');
-          
+
           // Display full traceback if available
           if ((compileResult as any).traceback) {
             // Save the compile error traceback for the AI
             setLastExecutionLogs((compileResult as any).traceback);
-            
-            const tracebackLines = (compileResult as any).traceback.split('\n');
-            tracebackLines.forEach((line: string) => {
+
+            const parsedTraceback = parseNCFailStackTrace((compileResult as any).traceback);
+            parsedTraceback.split('\n').forEach((line: string) => {
               if (line.trim()) {
                 addConsoleMessage('error', line);
               }
@@ -167,7 +183,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
           } else if (compileResult.errors && compileResult.errors.length > 0) {
             // Save errors as execution log
             setLastExecutionLogs(`Compile errors:\n${compileResult.errors.join('\n')}`);
-            
+
             // Fallback to errors array if no traceback
             compileResult.errors.forEach((error) => {
               addConsoleMessage('error', error);
@@ -175,11 +191,11 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
           } else if ((compileResult as any).error) {
             // Save single error as execution log (from pyodide-runner)
             setLastExecutionLogs(`Compile error: ${(compileResult as any).error}`);
-            
+
             // Fallback to single error message
             addConsoleMessage('error', (compileResult as any).error);
           }
-          
+
           setIsExecuting(false);
           return;
         }
@@ -303,10 +319,9 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
         if ((result as any).traceback) {
           // Save the traceback as execution logs for the AI
           setLastExecutionLogs((result as any).traceback);
-          
-          // Split traceback into lines and display each line
-          const tracebackLines = (result as any).traceback.split('\n');
-          tracebackLines.forEach((line: string) => {
+
+          const parsedTraceback = parseNCFailStackTrace((result as any).traceback);
+          parsedTraceback.split('\n').forEach((line: string) => {
             if (line.trim()) {
               addConsoleMessage('error', line);
             }
@@ -314,7 +329,7 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
         } else {
           // Save simple error as execution log
           setLastExecutionLogs(`Error: ${errorMessage}`);
-          
+
           // Fallback to simple error message
           if (errorMessage.includes('AttributeError')) {
             addConsoleMessage('error', `  → ${errorMessage}`);
