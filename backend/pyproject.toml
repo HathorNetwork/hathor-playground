@@ -30,6 +30,10 @@ google-generativeai = ">=0.8.0"
 redis = ">=5.0.0"
 slowapi = ">=0.1.9"
 
+# Beam Cloud SDK for dApp deployment (imports as 'beam')
+beta9 = ">=0.1.207"
+beam-client = ">=0.2.165"
+
 [tool.poetry.group.dev.dependencies]
 # Testing
 pytest = ">=7.4.3"

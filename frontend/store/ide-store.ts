@@ -3,6 +3,7 @@ import type { StateCreator } from 'zustand';
 import { Contract } from '@/lib/api';
 import { storage, initStorage, StoredFile, ChatSession, ChatMessage } from '@/lib/storage';
 import { SAMPLE_PROJECTS } from './sample-projects';
+import { beamClient } from '@/lib/beam-client';
 
 export type FileType = 'contract' | 'test' | 'component' | 'hook' | 'style' | 'config';
 export type FileLanguage = 'python' | 'typescript' | 'typescriptreact' | 'css' | 'json';
@@ -157,6 +158,36 @@ export function buildFolderTree(files: File[]): FolderNode {
   return root;
 }
 
+// Helper: Sync dApp files to Beam
+// Debounced to avoid too many uploads
+let beamSyncTimeout: NodeJS.Timeout | null = null;
+async function syncDAppFilesToBeam(projectId: string, file: File) {
+  // Only sync dapp/ files
+  if (!file.path.startsWith('/dapp/')) {
+    return;
+  }
+
+  console.log('Scheduling Beam sync for file:', file.path);
+
+  // Clear existing timeout
+  if (beamSyncTimeout) {
+    clearTimeout(beamSyncTimeout);
+  }
+
+  // Debounce: wait 1 second before uploading
+  beamSyncTimeout = setTimeout(async () => {
+    try {
+      console.log('Syncing file to Beam:', file.path);
+      await beamClient.uploadFiles(projectId, {
+        [file.path]: file.content
+      });
+      console.log('File synced to Beam successfully');
+    } catch (error) {
+      console.error('Failed to sync file to Beam:', error);
+    }
+  }, 1000);
+}
+
 const createIDEStore: StateCreator<IDEState> = (set, get) => {
   // Initialize with sample projects
   const initialProjects = SAMPLE_PROJECTS;
@@ -285,6 +316,9 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
       if (state.isStorageInitialized) {
         state.saveFileToStorage(file).catch(console.error);
       }
+
+      // Sync dApp files to Beam
+      syncDAppFilesToBeam(activeProject.id, file).catch(console.error);
     },
 
     updateFile: (id, content) => {
@@ -309,12 +343,18 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
         files: state.files.map((f) => (f.id === id ? { ...f, content } : f)),
       });
 
-      // Auto-persist to storage
-      if (state.isStorageInitialized) {
-        const updatedFile = state.files.find((f) => f.id === id);
-        if (updatedFile) {
-          state.saveFileToStorage({ ...updatedFile, content }).catch(console.error);
+      // Get the updated file
+      const updatedFile = state.files.find((f) => f.id === id);
+      if (updatedFile) {
+        const fileWithNewContent = { ...updatedFile, content };
+
+        // Auto-persist to storage
+        if (state.isStorageInitialized) {
+          state.saveFileToStorage(fileWithNewContent).catch(console.error);
         }
+
+        // Sync dApp files to Beam
+        syncDAppFilesToBeam(activeProject.id, fileWithNewContent).catch(console.error);
       }
     },
 

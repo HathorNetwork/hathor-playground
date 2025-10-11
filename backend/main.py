@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 import structlog
 
 from api.ai_assistant import router as ai_assistant_router
+from api.beam import router as beam_router
 from middleware.rate_limit import limiter, token_limit_middleware, \
     rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -63,6 +64,9 @@ app.middleware("http")(token_limit_middleware)
 # Include routers
 app.include_router(
     ai_assistant_router, prefix="/api/ai", tags=["ai-assistant"]
+)
+app.include_router(
+    beam_router, prefix="/api/beam", tags=["beam"]
 )
 
 

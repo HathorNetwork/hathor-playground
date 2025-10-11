@@ -113,6 +113,24 @@ class CounterTestCase(BlueprintTestCase):
         self.runner.call_public_method(self.contract_id, 'reset', context)
         self.assertEqual(0, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))`,
       },
+      // Starter dApp file for testing Beam integration
+      {
+        id: 'counter-dapp-starter',
+        name: 'page.tsx',
+        language: 'typescriptreact',
+        path: '/dapp/page.tsx',
+        type: 'component',
+        content: `export default function CounterDApp() {
+  return (
+    <div style={{ padding: '2rem', fontFamily: 'system-ui' }}>
+      <h1>Counter dApp - Coming Soon</h1>
+      <p>This is a starter file for testing Beam integration.</p>
+      <p>The LLM will generate the full dApp interface here.</p>
+    </div>
+  );
+}
+`,
+      },
     ],
   },
   {
@@ -441,6 +459,24 @@ class SwapDemoTestCase(BlueprintTestCase):
             return NCDepositAction
         else:
             return NCWithdrawalAction`,
+      },
+      // Starter dApp file for testing Beam integration
+      {
+        id: 'defi-dapp-starter',
+        name: 'page.tsx',
+        language: 'typescriptreact',
+        path: '/dapp/page.tsx',
+        type: 'component',
+        content: `export default function DeFiDApp() {
+  return (
+    <div style={{ padding: '2rem', fontFamily: 'system-ui' }}>
+      <h1>DeFi dApp - Coming Soon</h1>
+      <p>This is a starter file for testing Beam integration.</p>
+      <p>The LLM will generate the full DEX interface here.</p>
+    </div>
+  );
+}
+`,
       },
     ],
   },

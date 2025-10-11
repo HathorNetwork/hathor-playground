@@ -7,10 +7,13 @@ const nextConfig = {
     appDir: true,
   },
   async rewrites() {
+    // Use environment variable or default to localhost for development
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
     return [
       {
         source: '/api/:path*',
-        destination: 'http://backend:8000/api/:path*', // Proxy to Backend
+        destination: `${backendUrl}/api/:path*`, // Proxy to Backend
       },
     ];
   },
