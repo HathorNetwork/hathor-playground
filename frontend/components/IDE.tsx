@@ -6,7 +6,7 @@ import { CodeEditor } from './Editor/CodeEditor';
 import { Console } from './Console/Console';
 import { Toolbar } from './Toolbar/Toolbar';
 import { AIAssistant } from './AI/AIAssistant';
-import { PreviewPanel } from './Preview/PreviewPanel';
+import { RightPanel } from './RightPanel/RightPanel';
 import { PyodideLoader } from './PyodideLoader';
 import { useIDEStore, File } from '@/store/ide-store';
 import { contractsApi, validationApi } from '@/lib/api';
@@ -241,7 +241,7 @@ export function IDE() {
           </Panel>
           <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
           <Panel ref={aiPanelRef} defaultSize={30} minSize={20} maxSize={50}>
-            <PreviewPanel />
+            <RightPanel />
           </Panel>
         </PanelGroup>
       </div>

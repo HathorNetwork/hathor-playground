@@ -46,11 +46,14 @@ export const Console: React.FC<ConsoleProps> = ({ onRunTests }) => {
         (error) => {
           console.error('Failed to stream logs:', error);
           setIsStreamingLogs(false);
+          // Show user-friendly error message
+          addConsoleMessage('warning', 'Log streaming disconnected. Logs will appear when dev server is running.');
         }
       );
     } catch (error) {
       console.error('Error setting up log stream:', error);
       setIsStreamingLogs(false);
+      addConsoleMessage('error', `Failed to setup log stream: ${error}`);
     }
 
     // Cleanup on unmount or project change

@@ -261,6 +261,44 @@ export interface ChatResponse {
   modified_code?: string;
 }
 
+export interface GenerateDAppRequest {
+  description: string;
+  project_id: string;
+}
+
+export interface GeneratedFile {
+  path: string;
+  content: string;
+  language: string;
+}
+
+export interface GenerateDAppResponse {
+  success: boolean;
+  files: GeneratedFile[];
+  error?: string;
+}
+
+export interface AgenticChatRequest {
+  message: string;
+  project_id: string;
+  files: Record<string, string>;
+  conversation_history?: Array<{ role: string; content: string }>;
+}
+
+export interface ToolCall {
+  tool: string;
+  args: Record<string, any>;
+  result: string;
+}
+
+export interface AgenticChatResponse {
+  success: boolean;
+  message: string;
+  tool_calls: ToolCall[];
+  updated_files: Record<string, string>;
+  error?: string;
+}
+
 export const aiApi = {
   chat: async (request: ChatRequest): Promise<ChatResponse> => {
     const response = await api.post('/api/ai/chat', request);
@@ -274,6 +312,16 @@ export const aiApi = {
 
   getExamples: async (): Promise<{ examples: any[] }> => {
     const response = await api.get('/api/ai/examples');
+    return response.data;
+  },
+
+  generateDApp: async (request: GenerateDAppRequest): Promise<GenerateDAppResponse> => {
+    const response = await api.post('/api/ai/generate-dapp', request);
+    return response.data;
+  },
+
+  agenticChat: async (request: AgenticChatRequest): Promise<AgenticChatResponse> => {
+    const response = await api.post('/api/ai/agentic-chat', request);
     return response.data;
   },
 };

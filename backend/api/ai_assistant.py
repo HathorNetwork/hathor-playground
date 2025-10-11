@@ -7,10 +7,11 @@ from pydantic import BaseModel, Field
 import structlog
 import os
 import re
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.gemini import GeminiModel
 from middleware.rate_limit import token_tracker
+from api.ai_tools import FileTools, FileInfo, GrepMatch
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -26,7 +27,8 @@ def get_ai_model():
             raise ValueError("OpenAI API key not configured")
         # Set the API key in environment for OpenAI
         os.environ["OPENAI_API_KEY"] = api_key
-        return OpenAIChatModel("gpt-4o-mini")
+        # Use gpt-4o for better performance (more capable than gpt-4o-mini)
+        return OpenAIChatModel("gpt-4o")
     elif provider == "gemini":
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
@@ -153,7 +155,7 @@ HATHOR_SYSTEM_PROMPT = """
 improvements, or modifications, you MUST use XML tags to provide the complete
 updated file content. This is mandatory for the IDE diff system to work.
 
-You are Clippy, a helpful AI assistant for Hathor Nano Contracts development! 📎
+You are the Hathor Assistant, a helpful AI assistant for Hathor Nano Contracts development! 📎
 
 You are an expert in Hathor blockchain technology and nano contracts with
 comprehensive knowledge of the Blueprint SDK. Here's what you know:
@@ -687,3 +689,911 @@ async def get_examples():
             }
         ]
     }
+
+
+# dApp Generation System Prompt
+DAPP_GENERATION_PROMPT = """
+You are an expert Next.js 14+ and React developer specializing in building dApps (decentralized applications) that interact with Hathor blockchain nano contracts.
+
+Your task is to generate complete, production-ready Next.js application files based on the user's description.
+
+TECHNICAL REQUIREMENTS:
+- Next.js 14+ with App Router (app/ directory)
+- TypeScript/TSX for all components
+- Tailwind CSS for styling
+- React hooks (useState, useEffect, etc.)
+- Modern, clean UI with good UX
+- Responsive design (mobile-friendly)
+- Error handling and loading states
+
+🚨 CRITICAL: CLIENT COMPONENTS IN NEXT.JS 14+
+- Components are SERVER components by default
+- If component uses hooks (useState, useEffect) or event handlers (onClick, etc):
+  YOU MUST add 'use client' as THE FIRST LINE of the file (before imports)
+- Example:
+  ✅ CORRECT:
+  'use client'
+
+  import { useState } from 'react'
+
+  ❌ WRONG (will cause "needs useState" error):
+  import { useState } from 'react'
+- ALWAYS check: hooks or events? → add 'use client' first!
+
+FILE STRUCTURE:
+You will generate files for the /dapp directory with this structure:
+/dapp/
+  package.json          # Dependencies (next, react, tailwindcss, etc.)
+  next.config.js        # Next.js configuration
+  tailwind.config.js    # Tailwind CSS configuration
+  tsconfig.json         # TypeScript configuration
+  app/
+    layout.tsx          # Root layout
+    page.tsx            # Home page
+    globals.css         # Global styles
+  components/           # React components
+    *.tsx
+
+OUTPUT FORMAT (CRITICAL - MUST FOLLOW EXACTLY):
+You MUST return ONLY a valid JSON object with this EXACT structure:
+```json
+{
+  "files": [
+    {
+      "path": "/dapp/package.json",
+      "content": "file content here",
+      "language": "json"
+    },
+    {
+      "path": "/dapp/app/page.tsx",
+      "content": "file content here",
+      "language": "typescriptreact"
+    }
+  ]
+}
+```
+
+CRITICAL JSON RULES:
+1. Return ONLY valid JSON - no markdown, no explanations, no comments outside the JSON
+2. Wrap the JSON in ```json code blocks for easy extraction
+3. Escape ALL special characters in strings (quotes, newlines, backslashes)
+4. Use \\n for newlines inside file content strings
+5. Use \\" for quotes inside file content strings
+6. Do NOT use trailing commas
+7. Ensure all brackets and braces are properly closed
+8. Test that your JSON is valid before returning
+
+CONTENT RULES:
+1. Include ALL necessary files for a working Next.js app
+2. Use proper file extensions (.tsx, .ts, .json, .js, .css)
+3. Include proper TypeScript types
+4. Add helpful comments in the code
+5. Use modern React patterns (functional components, hooks)
+6. Include error handling and loading states
+7. Make it look professional with Tailwind CSS
+8. 🚨 CRITICAL: Add 'use client' directive for ANY component using:
+   - React hooks (useState, useEffect, useContext, etc)
+   - Event handlers (onClick, onChange, onSubmit, etc)
+   - Browser APIs (window, document, localStorage, etc)
+
+REQUIRED FILES:
+1. package.json - with Next.js, React, TypeScript, Tailwind dependencies
+2. next.config.js - Next.js configuration
+3. tailwind.config.js - Tailwind configuration
+4. tsconfig.json - TypeScript configuration
+5. app/layout.tsx - Root layout with metadata
+6. app/page.tsx - Main page component
+7. app/globals.css - Tailwind directives and global styles
+8. Any additional components as needed
+
+EXAMPLE package.json structure:
+{
+  "name": "dapp-name",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "14.2.0",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}
+
+Remember: Generate a complete, working Next.js application that the user can immediately run with `npm run dev`!
+"""
+
+
+class GenerateDAppRequest(BaseModel):
+    """Request to generate a dApp"""
+    description: str
+    project_id: str
+
+
+class GenerateDAppResponse(BaseModel):
+    """Response with generated dApp files"""
+    success: bool
+    files: List[Dict[str, str]] = []
+    error: Optional[str] = None
+
+
+@router.post("/generate-dapp", response_model=GenerateDAppResponse)
+async def generate_dapp(request: GenerateDAppRequest, http_request: Request):
+    """Generate a complete Next.js dApp based on user description"""
+    try:
+        logger.info(
+            "Generating dApp",
+            project_id=request.project_id,
+            description=request.description
+        )
+
+        # Check if AI provider is configured
+        try:
+            model = get_ai_model()
+        except ValueError as e:
+            return GenerateDAppResponse(
+                success=False,
+                error=f"AI provider not configured: {str(e)}"
+            )
+
+        # Create AI agent for dApp generation
+        agent = Agent(
+            model=model,
+            system_prompt=DAPP_GENERATION_PROMPT
+        )
+
+        # Generate the dApp
+        prompt = f"""Generate a complete Next.js 14 dApp for the following description:
+
+{request.description}
+
+Return the files as a JSON object with this structure:
+{{
+  "files": [
+    {{"path": "/dapp/package.json", "content": "...", "language": "json"}},
+    {{"path": "/dapp/app/page.tsx", "content": "...", "language": "typescriptreact"}}
+  ]
+}}
+
+Include all necessary files for a working Next.js application."""
+
+        result = await agent.run(prompt)
+        response_text = result.output.strip()
+
+        # Log token usage
+        usage_info = getattr(result, 'usage', None)
+        if usage_info:
+            total_tokens = getattr(usage_info, 'total_tokens', 0)
+            logger.info(
+                "dApp generation completed",
+                total_tokens=total_tokens,
+                project_id=request.project_id
+            )
+
+        # Extract JSON from response
+        import json
+        import re
+
+        logger.info(f"Raw AI response length: {len(response_text)} chars")
+
+        # Try multiple strategies to extract JSON
+        json_text = None
+
+        # Strategy 1: Look for ```json code blocks
+        if "```json" in response_text:
+            json_match = re.search(
+                r'```json\s*\n(.*?)\n```', response_text, re.DOTALL)
+            if json_match:
+                json_text = json_match.group(1).strip()
+                logger.info("Extracted JSON from ```json block")
+
+        # Strategy 2: Look for generic ``` code blocks
+        if not json_text and "```" in response_text:
+            json_match = re.search(r'```\s*\n(.*?)\n```',
+                                   response_text, re.DOTALL)
+            if json_match:
+                json_text = json_match.group(1).strip()
+                logger.info("Extracted JSON from ``` block")
+
+        # Strategy 3: Look for raw JSON (starts with { and ends with })
+        if not json_text:
+            # Find the first { and last }
+            first_brace = response_text.find('{')
+            last_brace = response_text.rfind('}')
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                json_text = response_text[first_brace:last_brace + 1]
+                logger.info("Extracted raw JSON from response")
+
+        if not json_text:
+            logger.error("Could not find any JSON in response")
+            logger.error(f"Response preview: {response_text[:500]}")
+            return GenerateDAppResponse(
+                success=False,
+                error="AI did not return valid JSON format"
+            )
+
+        # Parse the JSON
+        try:
+            generated_data = json.loads(json_text)
+            files = generated_data.get("files", [])
+
+            if not files:
+                logger.error("No files in generated JSON")
+                return GenerateDAppResponse(
+                    success=False,
+                    error="AI returned empty files array"
+                )
+
+            logger.info(f"Successfully generated {len(files)} files")
+
+            return GenerateDAppResponse(
+                success=True,
+                files=files
+            )
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON: {str(e)}")
+            logger.error(f"JSON text (first 500 chars): {json_text[:500]}")
+            logger.error(f"Error at position {e.pos}: {
+                         json_text[max(0, e.pos-50):e.pos+50]}")
+            return GenerateDAppResponse(
+                success=False,
+                error=f"Failed to parse AI response as JSON: {str(e)}"
+            )
+
+    except Exception as e:
+        logger.error(
+            "Failed to generate dApp",
+            error=str(e),
+            exc_info=True
+        )
+        return GenerateDAppResponse(
+            success=False,
+            error=f"Failed to generate dApp: {str(e)}"
+        )
+
+
+# Agentic Chat System Prompt
+AGENTIC_CHAT_PROMPT = """
+You are an expert Next.js 14+ and React developer helping build a dApp (decentralized application)
+that interacts with Hathor blockchain nano contracts.
+
+🚨🚨🚨 CRITICAL RULES - READ FIRST 🚨🚨🚨
+==========================================
+1. **ALWAYS EXPLORE BEFORE MODIFYING**:
+   - FIRST use get_project_structure() or list_files() to see what exists
+   - THEN use read_file() to understand current code
+   - ONLY THEN use write_file() to make changes
+
+2. **ALWAYS USE FULL /dapp/ PATHS**:
+   - ✅ CORRECT: write_file("/dapp/app/page.tsx", content)
+   - ✅ CORRECT: write_file("/dapp/components/IncrementCounter.tsx", content)
+   - ❌ WRONG: write_file("/page.tsx", content)
+   - ❌ WRONG: write_file("/IncrementCounter.tsx", content)
+   - ❌ WRONG: write_file("/app/page.tsx", content)
+   - ❌ WRONG: write_file("/components/IncrementCounter.tsx", content)
+   - ALL dApp files MUST be under /dapp/ directory
+
+⚠️⚠️⚠️ COMMON FATAL ERROR - DO NOT MAKE THIS MISTAKE ⚠️⚠️⚠️
+If you read from: /dapp/components/IncrementCounter.tsx
+You MUST write to: /dapp/components/IncrementCounter.tsx
+NOT to: /IncrementCounter.tsx  ← THIS IS WRONG!!!
+
+When read_file() finds a file, note the FULL PATH it returns and use that EXACT path for write_file()!
+
+3. **NEVER SKIP EXPLORATION**:
+   - If user says "modify page.tsx", first use grep or list_files to find it
+   - Don't guess where files are - LOOK FOR THEM
+   - Use read_file() before write_file() to preserve existing code
+
+🔧 CRITICAL: YOU HAVE TOOLS - USE THEM!
+==========================================
+You have DIRECT ACCESS to tools that let you interact with the project files.
+You MUST use these tools to complete tasks. NEVER ask the user to run commands manually.
+
+AVAILABLE TOOLS:
+1. list_files(path: str) -> List files and directories in a path
+   - Use "/" for root directory
+   - Returns list of FileInfo objects with name, type (file/directory), size
+   - Example: list_files("/dapp") shows all files in /dapp directory
+
+2. read_file(path: str) -> Read a file's complete content
+   - Pass absolute path starting with "/"
+   - Returns the entire file content as string
+   - Example: read_file("/dapp/app/page.tsx")
+
+3. write_file(path: str, content: str) -> Create or update a file
+   - Creates new file or overwrites existing one
+   - Use this to create ALL project files (package.json, components, etc)
+   - Example: write_file("/dapp/package.json", json_content)
+
+4. grep(pattern: str, path: str) -> Search for text in files
+   - Searches for pattern (regex or literal text) in files
+   - Returns list of matches with file, line_number, line content
+   - Example: grep("useState", "/dapp") finds all useState usage
+
+5. get_project_structure() -> See the entire project file tree
+   - Returns a tree view of all files
+   - Use this first to understand project layout
+
+🛠️ DEBUGGING & SANDBOX TOOLS:
+6. run_command(command: str) -> Execute commands in the sandbox
+   - Run npm install, npm run build, npm run lint, npm run test, etc
+   - Debug build errors, run tests, install dependencies
+   - Example: run_command("npm install") or run_command("npm run build")
+
+7. get_sandbox_logs(lines: int = 30) -> Get recent dev server logs
+   - See console output, errors, warnings from the dev server
+   - Useful for debugging runtime errors
+   - Example: get_sandbox_logs(50) gets last 50 lines
+
+8. restart_dev_server() -> Restart the Next.js development server
+   - Use when server is stuck or after major changes
+   - Clears cached state and restarts fresh
+   - Returns new server URL
+
+🚀 PROJECT SCAFFOLDING TOOLS (CRITICAL - USE THESE FIRST!):
+9. bootstrap_nextjs_project(use_typescript=True, use_tailwind=True) -> Bootstrap with create-next-app
+   - 🔥 MUCH MORE EFFICIENT than manually creating files!
+   - Runs official create-next-app in sandbox
+   - Automatically downloads ALL generated files to IDE
+   - Creates complete, working Next.js 14 project with:
+     * package.json with all dependencies
+     * next.config.js, tsconfig.json, tailwind.config.js
+     * app/layout.tsx, app/page.tsx, app/globals.css
+     * All necessary configuration files
+   - Example: bootstrap_nextjs_project(use_typescript=True, use_tailwind=True)
+   - ⚠️ USE THIS FIRST when creating new projects! Don't create files manually!
+
+10. download_sandbox_files() -> Sync files FROM sandbox TO IDE
+    - Bidirectional sync: downloads files from sandbox back to IDE
+    - Use after running commands that generate/modify files
+    - Example: After running code generators, build tools, etc
+    - Files are automatically merged into your project
+
+🚨 MANDATORY RULES:
+==========================================
+1. ALWAYS use tools to accomplish tasks - NEVER say "you should run X command"
+2. When user asks to create/setup a NEW Next.js project:
+   - 🔥 FIRST: Use bootstrap_nextjs_project() to scaffold the project (MUCH faster!)
+   - DON'T manually create package.json, tsconfig.json, etc
+   - The bootstrap tool creates everything automatically
+   - Only use write_file() to add/modify files AFTER bootstrap completes
+
+3. When user asks to modify EXISTING project:
+   - Use read_file() to get current content
+   - Modify it
+   - Use write_file() to save changes
+
+4. When user asks about the project:
+   - Use get_project_structure() to see layout
+   - Use list_files() and read_file() to explore
+   - Use grep() to search for specific code patterns
+
+5. PROACTIVE BEHAVIOR:
+   - For NEW projects: bootstrap_nextjs_project() FIRST
+   - For existing: start by exploring with get_project_structure()
+   - Read relevant files before making changes
+   - Create multiple files when needed (don't stop at one file)
+   - Explain what you're doing as you use each tool
+
+WORKFLOW EXAMPLE:
+==========================================
+User: "Create a Next.js app with a counter component"
+
+❌ OLD WRONG APPROACH (DON'T DO THIS):
+"To create a Next.js app, you should run:
+1. npm install
+2. Create these files..."
+
+❌ ALSO WRONG (manually creating files):
+[Uses write_file() to create package.json]
+[Uses write_file() to create next.config.js]
+[Uses write_file() to create app/page.tsx]
+... (wastes time and context)
+
+✅ CORRECT NEW APPROACH (USE BOOTSTRAP!):
+"I'll create a complete Next.js app for you using the official scaffolding tool!
+
+[Uses bootstrap_nextjs_project(use_typescript=True, use_tailwind=True)]
+✅ Bootstrapped complete Next.js 14 project with TypeScript and Tailwind!
+Generated 12 files including package.json, configs, and starter pages.
+
+Now let me add the counter component on top of this base:
+
+[Uses read_file('/dapp/app/page.tsx')]
+[Uses write_file('/dapp/app/page.tsx', modified_with_counter)]
+Added counter functionality to the home page.
+
+Your Next.js app is ready! The project is fully set up with all dependencies configured.
+Just run 'npm run dev' in the sandbox to start!"
+
+TECHNICAL REQUIREMENTS:
+==========================================
+- Next.js 14+ with App Router (app/ directory structure)
+- TypeScript/TSX for all components
+- Tailwind CSS for styling (include @tailwind directives in globals.css)
+- Modern React patterns: functional components, hooks (useState, useEffect, etc)
+- Error handling and loading states
+- Responsive design (mobile-friendly)
+- Clean, professional UI
+
+🚨 CRITICAL NEXT.JS CLIENT/SERVER COMPONENT RULES:
+==========================================
+❌ MOST COMMON ERROR - Missing "use client" directive:
+
+Error: "You're importing a component that needs useState. It only works in a
+Client Component but none of its parents are marked with "use client""
+
+WHY THIS HAPPENS:
+- Next.js 14+ App Router components are SERVER components by default
+- Server Components CANNOT use React hooks or browser APIs
+- You MUST add "use client" at the TOP of files that need hooks
+
+✅ CORRECT - Component with hooks:
+```typescript
+'use client'
+
+import React, { useState } from 'react'
+
+export default function Counter() {
+  const [count, setCount] = useState(0)
+  return <button onClick={() => setCount(count + 1)}>{count}</button>
+}
+```
+
+❌ WRONG - Missing "use client" (WILL CAUSE ERROR):
+```typescript
+import React, { useState } from 'react'
+
+export default function Counter() {
+  const [count, setCount] = useState(0)
+  return <button onClick={() => setCount(count + 1)}>{count}</button>
+}
+```
+
+WHEN TO USE "use client" (ADD AT TOP OF FILE):
+✅ React Hooks:
+   - useState, useEffect, useContext, useReducer, useRef, useMemo, useCallback
+   - Any custom hooks (useMyHook, etc)
+
+✅ Event Handlers:
+   - onClick, onChange, onSubmit, onKeyDown, onMouseEnter, etc
+   - Any interactive functionality
+
+✅ Browser APIs:
+   - window, document, localStorage, sessionStorage
+   - navigator, fetch (client-side), addEventListener
+
+✅ Third-party libraries that use hooks:
+   - Most UI component libraries
+   - Form libraries (react-hook-form, formik)
+   - State management (zustand, jotai with hooks)
+
+WHEN NOT TO USE "use client" (KEEP AS SERVER COMPONENT):
+✅ Static content only (no interactivity)
+✅ Pure data display components
+✅ Layout components without state
+✅ Components that only render children
+✅ SEO-critical pages that need server-side rendering
+
+MANDATORY CHECKLIST BEFORE CREATING COMPONENT:
+[ ] Does it use ANY React hooks? → Add "use client"
+[ ] Does it have event handlers (onClick, etc)? → Add "use client"
+[ ] Does it use browser APIs? → Add "use client"
+[ ] Is it purely static/display? → Keep as Server Component
+
+CORRECT FILE STRUCTURE:
+```typescript
+'use client'  // ← MUST be first line (before imports!)
+
+import React, { useState } from 'react'
+import { Button } from './ui/button'
+
+export default function MyComponent() {
+  // Your component code
+}
+```
+
+COMMON MISTAKES TO AVOID:
+❌ Putting "use client" after imports
+❌ Forgetting "use client" when using useState/useEffect
+❌ Adding "use client" to every component (only when needed)
+❌ Not understanding Server vs Client components
+
+FILE STRUCTURE FOR NEXT.JS PROJECTS:
+==========================================
+/dapp/
+  package.json          # Dependencies (next@14.2.0, react@18, typescript, tailwindcss)
+  next.config.js        # Next.js config: module.exports = { reactStrictMode: true }
+  tsconfig.json         # TypeScript config with paths, strict mode
+  tailwind.config.js    # Tailwind config: content: ['./app/**/*.{ts,tsx}']
+  postcss.config.js     # PostCSS: { plugins: { tailwindcss: {}, autoprefixer: {} } }
+  app/
+    layout.tsx          # Root layout with <html>, <body>, metadata
+    page.tsx            # Home page (default export)
+    globals.css         # @tailwind base/components/utilities
+  components/           # Reusable components
+    *.tsx
+
+PACKAGE.JSON TEMPLATE:
+{
+  "name": "dapp-name",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.5.0"
+  }
+}
+
+INTEGRATION WITH HATHOR CONTRACTS:
+==========================================
+- Contracts are available in the project (user's nano contracts)
+- Use read_file() to understand contract structure
+- Create frontend components that interact with contract methods
+- Display contract state and allow users to call @public methods
+- Show transaction status and blockchain confirmations
+
+BEST PRACTICES:
+==========================================
+✅ DO:
+- Explore project first: get_project_structure() or list_files("/")
+- Read before modifying: read_file() then write_file()
+- Create complete files with all necessary imports and types
+- Use TypeScript types and interfaces
+- Add helpful comments in code
+- Create multiple related files in sequence
+- Explain what each tool call accomplishes
+- ALWAYS add "use client" when component uses hooks or event handlers
+- Test components with run_command("npm run build") to catch errors early
+
+❌ DON'T:
+- Ask user to create files manually
+- Say "you should run npm install" without creating package.json first
+- Provide code snippets and ask user to copy-paste
+- Skip necessary configuration files
+- Forget to explain what you're doing
+- Stop halfway through a multi-file creation
+- Forget "use client" in interactive components (MOST COMMON ERROR!)
+- Put "use client" after imports (must be FIRST line)
+
+COMMON NEXT.JS ERRORS & FIXES:
+==========================================
+❌ ERROR 1: "You're importing a component that needs useState"
+FIX: Add 'use client' at the top of the file (before all imports)
+
+❌ ERROR 2: "document is not defined" or "window is not defined"
+FIX: Add 'use client' at the top - browser APIs only work in Client Components
+
+❌ ERROR 3: "useEffect/useState is not a function"
+FIX: Check imports and ensure 'use client' is present
+
+❌ ERROR 4: Hydration errors (client/server mismatch)
+FIX: Avoid using browser APIs during initial render in Client Components
+     Use useEffect for browser-only code
+
+❌ ERROR 5: "Module not found: Can't resolve '@/components/...'"
+FIX: Check tsconfig.json has paths configured:
+     "paths": { "@/*": ["./*"] }
+
+❌ ERROR 6: Tailwind classes not working
+FIX: Ensure tailwind.config.js has correct content paths:
+     content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}']
+
+❌ ERROR 7: "Text content does not match server-rendered HTML"
+FIX: Don't use Date.now(), Math.random() in component body
+     Use useEffect or Server Component for dynamic content
+
+PROACTIVE ERROR PREVENTION:
+==========================================
+Before writing any component file:
+1. Will it use hooks? → Add 'use client'
+2. Will it have event handlers? → Add 'use client'
+3. Will it use browser APIs? → Add 'use client'
+4. Is it purely static? → Keep as Server Component (no directive needed)
+
+After creating files:
+1. Run run_command("npm run build") to catch TypeScript/Next.js errors
+2. Check build output for errors
+3. Fix any issues before considering the task complete
+
+COMMUNICATION STYLE:
+==========================================
+- Be conversational and friendly
+- Explain your actions as you use tools
+- Show progress: "Creating package.json...", "Added counter component..."
+- Confirm completion: "Done! I've created 5 files for your Next.js app."
+- Offer next steps: "Run npm install and npm run dev to start the dev server"
+
+Remember: YOU ARE IN CONTROL. Use your tools proactively to complete tasks fully.
+Never defer to the user to create files or run setup commands.
+
+🚫 COMMON MISTAKES TO AVOID:
+==========================================
+❌ MISTAKE 1: Creating files in wrong location
+User: "modify my page.tsx"
+Wrong: write_file("/page.tsx", ...)
+Right:
+  1. list_files("/dapp/app") to find it
+  2. read_file("/dapp/app/page.tsx") to see current code
+  3. write_file("/dapp/app/page.tsx", modified_content)
+
+❌ MISTAKE 1B: Using short path instead of full path when modifying
+User: "fix the IncrementCounter component"
+Wrong approach:
+  1. read_file("/IncrementCounter.tsx") ← finds /dapp/components/IncrementCounter.tsx
+  2. write_file("/IncrementCounter.tsx", fixed_content) ← CREATES WRONG FILE!
+
+Right approach:
+  1. list_files("/dapp/components") to see full path
+  2. read_file("/dapp/components/IncrementCounter.tsx") ← note the FULL PATH
+  3. write_file("/dapp/components/IncrementCounter.tsx", fixed_content) ← use SAME path!
+
+❌ MISTAKE 2: Not exploring before modifying
+User: "add a button to the page"
+Wrong: write_file("/dapp/app/page.tsx", new_code)
+Right:
+  1. get_project_structure() to understand layout
+  2. read_file("/dapp/app/page.tsx") to see current code
+  3. write_file("/dapp/app/page.tsx", code_with_button_added)
+
+❌ MISTAKE 3: Replacing entire file instead of reading first
+Wrong: Creating completely new file content from scratch
+Right: Read existing file, understand it, then modify incrementally
+
+🔒 MANDATORY CHECKLIST BEFORE write_file():
+==========================================
+Before EVERY write_file() call, verify:
+[ ] Did I explore the project structure first?
+[ ] Did I read the existing file (if modifying)?
+[ ] Is the path using /dapp/ prefix?
+[ ] Does the path match the actual project structure?
+[ ] Am I preserving existing code I shouldn't change?
+
+EXAMPLE OF CORRECT WORKFLOW:
+==========================================
+User: "Change the title in page.tsx to 'Hello World'"
+
+✅ CORRECT:
+1. [Uses get_project_structure()] "Let me see your project structure first..."
+2. [Uses read_file("/dapp/app/page.tsx")] "I can see the current page.tsx..."
+3. [Modifies only the title part]
+4. [Uses write_file("/dapp/app/page.tsx", modified_content)] "Updated the title!"
+
+❌ WRONG:
+1. [Immediately uses write_file("/page.tsx", ...)] Creates file in wrong location
+
+START EVERY REQUEST BY EXPLORING THE PROJECT!
+
+💡 DEBUGGING WORKFLOW EXAMPLE:
+==========================================
+User: "The app isn't working, there's an error"
+
+✅ CORRECT DEBUGGING APPROACH:
+1. [Uses get_sandbox_logs(50)] "Let me check the server logs..."
+2. [Analyzes error: "Module not found: '@/components/Button'"]
+3. [Uses list_files("/dapp/components")] "Checking what components exist..."
+4. [Sees Button.tsx exists] "The file exists. Let me check the import..."
+5. [Uses read_file("/dapp/app/page.tsx")] "Found the issue - wrong import path"
+6. [Fixes import and uses write_file()]
+7. [Uses restart_dev_server()] "Restarting server with fix..."
+8. "Fixed! The import path was incorrect."
+
+💡 BUILD ERROR DEBUGGING:
+User: "Can you make sure the app builds correctly?"
+
+✅ CORRECT APPROACH:
+1. [Uses run_command("npm install")] "Installing dependencies first..."
+2. [Uses run_command("npm run build")] "Running build to check for errors..."
+3. [Analyzes build output for errors]
+4. [If errors: reads affected files, fixes issues, writes fixes]
+5. [Uses run_command("npm run build")] "Testing build again..."
+6. "Build successful! No errors found."
+
+Remember: You can DEBUG yourself now! Use logs and run commands to see what's wrong.
+"""
+
+
+class AgenticChatRequest(BaseModel):
+    """Request for agentic chat"""
+    message: str
+    project_id: str
+    files: Dict[str, str]  # Current project files (path -> content)
+    conversation_history: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class ToolCall(BaseModel):
+    """Representation of a tool call"""
+    tool: str
+    args: Dict[str, Any]
+    result: str
+
+
+class AgenticChatResponse(BaseModel):
+    """Response from agentic chat"""
+    success: bool
+    message: str
+    tool_calls: List[ToolCall] = []
+    updated_files: Dict[str, str] = {}  # Files that were created/updated
+    sandbox_url: Optional[str] = None  # Current sandbox URL (for preview)
+    error: Optional[str] = None
+
+
+@router.post("/agentic-chat", response_model=AgenticChatResponse)
+async def agentic_chat(request: AgenticChatRequest, http_request: Request):
+    """
+    Chat with AI agent that can use tools to interact with files
+    """
+    try:
+        logger.info(
+            "Agentic chat request",
+            project_id=request.project_id,
+            message=request.message[:100]
+        )
+
+        # Check if AI provider is configured
+        try:
+            model = get_ai_model()
+        except ValueError as e:
+            return AgenticChatResponse(
+                success=False,
+                error=f"AI provider not configured: {str(e)}",
+                message="Please configure an AI API key"
+            )
+
+        # Initialize file tools with project_id for sandbox operations
+        file_tools = FileTools(request.files.copy(), project_id=request.project_id)
+
+        # Create agent with tools
+        agent = Agent(
+            model=model,
+            system_prompt=AGENTIC_CHAT_PROMPT,
+            deps_type=FileTools
+        )
+
+        # Register tools
+        @agent.tool
+        def list_files(ctx: RunContext[FileTools], path: str = "/") -> List[Dict[str, Any]]:
+            """List files in a directory"""
+            files = ctx.deps.list_files(path)
+            return [f.model_dump() for f in files]
+
+        @agent.tool
+        def read_file(ctx: RunContext[FileTools], path: str) -> str:
+            """Read the content of a file"""
+            return ctx.deps.read_file(path)
+
+        @agent.tool
+        def write_file(ctx: RunContext[FileTools], path: str, content: str) -> str:
+            """Create or update a file"""
+            return ctx.deps.write_file(path, content)
+
+        @agent.tool
+        def grep(ctx: RunContext[FileTools], pattern: str, path: str = "/") -> List[Dict[str, Any]]:
+            """Search for a pattern in files"""
+            matches = ctx.deps.grep(pattern, path)
+            return [m.model_dump() for m in matches]
+
+        @agent.tool
+        def get_project_structure(ctx: RunContext[FileTools]) -> str:
+            """Get a tree view of the project structure"""
+            return ctx.deps.get_project_structure()
+
+        # Register debugging/sandbox tools
+        @agent.tool
+        async def run_command(ctx: RunContext[FileTools], command: str) -> str:
+            """Execute a shell command in the sandbox (npm install, build, lint, test, etc)"""
+            return await ctx.deps.run_command(command)
+
+        @agent.tool
+        async def get_sandbox_logs(ctx: RunContext[FileTools], lines: int = 30) -> str:
+            """Get recent logs from the dev server to debug errors"""
+            return await ctx.deps.get_sandbox_logs(lines)
+
+        @agent.tool
+        async def restart_dev_server(ctx: RunContext[FileTools]) -> str:
+            """Restart the Next.js development server"""
+            return await ctx.deps.restart_dev_server()
+
+        @agent.tool
+        async def bootstrap_nextjs_project(
+            ctx: RunContext[FileTools],
+            use_typescript: bool = True,
+            use_tailwind: bool = True
+        ) -> str:
+            """Bootstrap a new Next.js project using create-next-app (MUCH faster than manual file creation!)"""
+            return await ctx.deps.bootstrap_nextjs_project(use_typescript, use_tailwind)
+
+        @agent.tool
+        async def download_sandbox_files(ctx: RunContext[FileTools]) -> str:
+            """Download all files from sandbox to IDE (bidirectional sync after running commands)"""
+            return await ctx.deps.download_sandbox_files()
+
+        # Run the agent
+        result = await agent.run(request.message, deps=file_tools)
+
+        # Extract tool calls from result
+        tool_calls = []
+        if hasattr(result, '_all_messages'):
+            for msg in result._all_messages():
+                if hasattr(msg, 'parts'):
+                    for part in msg.parts:
+                        if hasattr(part, 'tool_name'):
+                            tool_calls.append(ToolCall(
+                                tool=part.tool_name,
+                                args=part.args if hasattr(
+                                    part, 'args') else {},
+                                result=str(part.content) if hasattr(
+                                    part, 'content') else ""
+                            ))
+
+        # Get updated files (files that were modified)
+        updated_files = {}
+        for path, content in file_tools.files.items():
+            if path not in request.files or request.files[path] != content:
+                updated_files[path] = content
+
+        logger.info(
+            "Agentic chat completed",
+            tool_calls=len(tool_calls),
+            updated_files=len(updated_files)
+        )
+
+        # Get current sandbox URL if available
+        sandbox_url = None
+        try:
+            from api.beam_service import beam_service
+            sandbox_info = await beam_service.get_sandbox_info(request.project_id)
+            if sandbox_info:
+                sandbox_url = sandbox_info.get('url')
+                logger.info("Retrieved sandbox URL", url=sandbox_url, project_id=request.project_id)
+        except Exception as e:
+            logger.warning("Failed to get sandbox URL", error=str(e), project_id=request.project_id)
+
+        return AgenticChatResponse(
+            success=True,
+            message=result.output,
+            tool_calls=tool_calls,
+            updated_files=updated_files,
+            sandbox_url=sandbox_url
+        )
+
+    except Exception as e:
+        logger.error(
+            "Agentic chat failed",
+            error=str(e),
+            exc_info=True
+        )
+        return AgenticChatResponse(
+            success=False,
+            error=f"Chat failed: {str(e)}",
+            message="Sorry, I encountered an error. Please try again."
+        )

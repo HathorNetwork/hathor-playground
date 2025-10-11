@@ -158,6 +158,19 @@ export function buildFolderTree(files: File[]): FolderNode {
   return root;
 }
 
+// Helper: Save projects to localStorage
+function saveProjectsToLocalStorage(projects: Project[], activeProjectId: string | null) {
+  try {
+    localStorage.setItem('hathor-projects', JSON.stringify(projects));
+    if (activeProjectId) {
+      localStorage.setItem('hathor-active-project-id', activeProjectId);
+    }
+    console.log('Projects saved to localStorage');
+  } catch (error) {
+    console.error('Failed to save projects to localStorage:', error);
+  }
+}
+
 // Helper: Sync dApp files to Beam
 // Debounced to avoid too many uploads
 let beamSyncTimeout: NodeJS.Timeout | null = null;
@@ -229,13 +242,18 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
         lastModified: Date.now(),
       };
 
-      set((state) => ({
-        projects: [...state.projects, newProject],
-        activeProjectId: newProject.id,
-        files: [],
-        openFileIds: [],
-        activeFileId: null,
-      }));
+      set((state) => {
+        const newProjects = [...state.projects, newProject];
+        saveProjectsToLocalStorage(newProjects, newProject.id);
+
+        return {
+          projects: newProjects,
+          activeProjectId: newProject.id,
+          files: [],
+          openFileIds: [],
+          activeFileId: null,
+        };
+      });
 
       return newProject.id;
     },
@@ -305,6 +323,9 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
           : p
       );
 
+      // Save to localStorage
+      saveProjectsToLocalStorage(updatedProjects, state.activeProjectId);
+
       set({
         projects: updatedProjects,
         files: [...state.files, file],
@@ -337,6 +358,9 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
             }
           : p
       );
+
+      // Save to localStorage
+      saveProjectsToLocalStorage(updatedProjects, state.activeProjectId);
 
       set({
         projects: updatedProjects,
@@ -374,6 +398,9 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
             }
           : p
       );
+
+      // Save to localStorage
+      saveProjectsToLocalStorage(updatedProjects, state.activeProjectId);
 
       const newOpenFileIds = state.openFileIds.filter((fileId) => fileId !== id);
       let newActiveFileId = state.activeFileId;
@@ -603,8 +630,36 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
     },
 
     loadFilesFromStorage: async () => {
-      // For now, keep sample projects - we'll add persistence later
-      console.log('Loaded sample projects');
+      try {
+        // Load projects from localStorage
+        const storedProjectsJson = localStorage.getItem('hathor-projects');
+
+        if (storedProjectsJson) {
+          const storedProjects: Project[] = JSON.parse(storedProjectsJson);
+
+          if (storedProjects.length > 0) {
+            const activeProjectId = localStorage.getItem('hathor-active-project-id') || storedProjects[0].id;
+            const activeProject = storedProjects.find(p => p.id === activeProjectId) || storedProjects[0];
+
+            set({
+              projects: storedProjects,
+              activeProjectId: activeProject.id,
+              files: activeProject.files,
+              openFileIds: activeProject.files[0] ? [activeProject.files[0].id] : [],
+              activeFileId: activeProject.files[0]?.id || null,
+            });
+
+            console.log(`Loaded ${storedProjects.length} projects from localStorage`);
+            return;
+          }
+        }
+
+        // Fallback: no stored projects, keep sample projects
+        console.log('No stored projects found, using sample projects');
+      } catch (error) {
+        console.error('Failed to load projects from storage:', error);
+        // Fallback to sample projects on error
+      }
     },
 
     saveFileToStorage: async (file: File) => {

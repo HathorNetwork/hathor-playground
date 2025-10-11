@@ -23,6 +23,7 @@ class UploadFilesRequest(BaseModel):
     """Request to upload files to sandbox"""
     project_id: str
     files: Dict[str, str]  # path -> content mapping
+    auto_start: bool = True  # Whether to auto-start dev server after upload
 
 
 class SandboxResponse(BaseModel):
@@ -85,13 +86,17 @@ async def upload_files(request: UploadFilesRequest):
     Upload files to a project's sandbox
 
     Args:
-        request: UploadFilesRequest with project_id and files
+        request: UploadFilesRequest with project_id, files, and auto_start
 
     Returns:
         UploadResponse with status
     """
     try:
-        result = await beam_service.upload_files(request.project_id, request.files)
+        result = await beam_service.upload_files(
+            request.project_id,
+            request.files,
+            auto_start=request.auto_start
+        )
         return UploadResponse(**result)
     except Exception as e:
         logger.error(
@@ -132,21 +137,116 @@ async def stream_logs(project_id: str):
     Returns:
         StreamingResponse with SSE logs
     """
-    try:
-        def event_generator():
+    def event_generator():
+        """Generate SSE events with proper error handling"""
+        try:
+            # Check if there's a process running
+            if project_id not in beam_service.processes:
+                # Send a single message and close cleanly
+                yield f"data: No active dev server found for project {project_id}\n\n"
+                yield f"data: Start the dev server first to see logs\n\n"
+                return
+
+            # Stream logs from the process
             for log_line in beam_service.stream_logs(project_id):
                 # Format as SSE event
                 yield f"data: {log_line}\n\n"
 
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Disable nginx buffering
-            }
-        )
-    except Exception as e:
-        logger.error("Failed to stream logs", project_id=project_id, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to stream logs: {str(e)}")
+        except GeneratorExit:
+            # Client disconnected - this is normal
+            logger.info("Client disconnected from log stream", project_id=project_id)
+        except Exception as e:
+            # Send error as SSE event
+            logger.error("Error streaming logs", project_id=project_id, error=str(e))
+            yield f"data: ERROR: {str(e)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
+
+@router.get("/sandbox/{project_id}/events")
+async def stream_sandbox_events(project_id: str):
+    """
+    Stream sandbox state changes via Server-Sent Events
+
+    Events include:
+    - sandbox_created: When a new sandbox is created
+    - sandbox_ready: When sandbox is ready to receive requests
+    - dev_server_started: When Next.js dev server starts
+    - dev_server_ready: When dev server is accepting connections
+    - files_synced: When files are uploaded/synced
+
+    Args:
+        project_id: Project identifier
+
+    Returns:
+        StreamingResponse with SSE events
+    """
+    import asyncio
+    import json
+
+    async def event_generator():
+        """Generate SSE events for sandbox state changes"""
+        try:
+            # Send initial state
+            sandbox_info = await beam_service.get_sandbox_info(project_id)
+            if sandbox_info:
+                initial_event = {
+                    "type": "sandbox_ready",
+                    "url": sandbox_info.get("url"),
+                    "sandbox_id": sandbox_info.get("sandbox_id")
+                }
+                yield f"data: {json.dumps(initial_event)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'no_sandbox'})}\n\n"
+
+            # Poll for changes every 2 seconds
+            last_url = sandbox_info.get("url") if sandbox_info else None
+
+            while True:
+                await asyncio.sleep(2)
+
+                current_info = await beam_service.get_sandbox_info(project_id)
+                if current_info:
+                    current_url = current_info.get("url")
+
+                    # URL changed (new sandbox created)
+                    if current_url != last_url:
+                        event = {
+                            "type": "sandbox_updated",
+                            "url": current_url,
+                            "sandbox_id": current_info.get("sandbox_id")
+                        }
+                        yield f"data: {json.dumps(event)}\n\n"
+                        last_url = current_url
+
+                    # Heartbeat to keep connection alive
+                    yield f": heartbeat\n\n"
+                else:
+                    # Sandbox disappeared
+                    if last_url is not None:
+                        yield f"data: {json.dumps({'type': 'sandbox_removed'})}\n\n"
+                        last_url = None
+
+        except GeneratorExit:
+            logger.info("Client disconnected from sandbox events", project_id=project_id)
+        except Exception as e:
+            logger.error("Error streaming sandbox events", project_id=project_id, error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )

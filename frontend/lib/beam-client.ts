@@ -57,7 +57,11 @@ export class BeamClient {
   /**
    * Upload files to sandbox
    */
-  async uploadFiles(projectId: string, files: Record<string, string>): Promise<UploadResult> {
+  async uploadFiles(
+    projectId: string,
+    files: Record<string, string>,
+    autoStart: boolean = true
+  ): Promise<UploadResult> {
     const response = await fetch(`${API_BASE}/sandbox/upload`, {
       method: 'POST',
       headers: {
@@ -66,6 +70,7 @@ export class BeamClient {
       body: JSON.stringify({
         project_id: projectId,
         files,
+        auto_start: autoStart,
       }),
     });
 
@@ -147,9 +152,22 @@ export class BeamClient {
 
     eventSource.onerror = (error) => {
       console.error('SSE Error:', error);
+
+      // Close the connection to prevent infinite reconnect attempts
+      eventSource.close();
+
+      // Notify caller
       if (onError) {
         onError(error);
+      } else {
+        // Default error handling if no callback provided
+        console.warn('Log streaming failed. Connection closed.');
       }
+    };
+
+    // Handle when connection opens successfully
+    eventSource.onopen = () => {
+      console.log('Log stream connected for project:', projectId);
     };
 
     return eventSource;

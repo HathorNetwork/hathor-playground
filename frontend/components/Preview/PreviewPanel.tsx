@@ -45,6 +45,35 @@ export const PreviewPanel: React.FC = () => {
     };
 
     loadSandbox();
+
+    // Subscribe to sandbox events (SSE) for real-time URL updates
+    const eventSource = new EventSource(`/api/beam/sandbox/${activeProjectId}/events`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'sandbox_ready' || data.type === 'sandbox_updated') {
+          console.log('Sandbox URL updated:', data.url);
+          setIframeUrl(data.url);
+          setError(null);
+        } else if (data.type === 'sandbox_removed') {
+          console.log('Sandbox removed');
+          setIframeUrl(null);
+        }
+      } catch (err) {
+        console.error('Failed to parse SSE event:', err);
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.error('SSE connection error:', err);
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, [activeProjectId]);
 
   const refreshIframe = useCallback(() => {
