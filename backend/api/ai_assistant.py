@@ -16,6 +16,20 @@ from api.ai_tools import FileTools, FileInfo, GrepMatch
 logger = structlog.get_logger()
 router = APIRouter()
 
+# Global execution tracking for polling
+execution_status: Dict[str, Dict[str, Any]] = {}
+
+class ExecutionStatus(BaseModel):
+    """Status of an ongoing execution"""
+    execution_id: str
+    status: str  # 'running', 'complete', 'error'
+    current_step: Optional[str] = None
+    tool_calls: List[Dict[str, Any]] = []
+    message: Optional[str] = None
+    error: Optional[str] = None
+    updated_files: Dict[str, str] = {}
+    sandbox_url: Optional[str] = None
+
 
 def get_ai_model():
     """Get AI model based on environment configuration"""

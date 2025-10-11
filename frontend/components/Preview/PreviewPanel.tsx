@@ -5,11 +5,12 @@ import { ExternalLink, RotateCcw, Loader2 } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 
 export const PreviewPanel: React.FC = () => {
-  const { activeProjectId } = useIDEStore();
+  const { activeProjectId, files } = useIDEStore();
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [iframeReady, setIframeReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDeploying, setIsDeploying] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Load sandbox URL for active project
@@ -100,6 +101,64 @@ export const PreviewPanel: React.FC = () => {
     setError('Failed to load preview');
   };
 
+  const handleDeployProject = async () => {
+    if (!activeProjectId || isDeploying) return;
+
+    setIsDeploying(true);
+    setError(null);
+
+    try {
+      // Get dApp files only
+      const dappFiles: Record<string, string> = {};
+      files.forEach((file) => {
+        if (file.path.startsWith('/dapp/')) {
+          dappFiles[file.path] = file.content;
+        }
+      });
+
+      if (Object.keys(dappFiles).length === 0) {
+        setError('No dApp files found. Create files in /dapp/ folder first.');
+        setIsDeploying(false);
+        return;
+      }
+
+      console.log(`Deploying ${Object.keys(dappFiles).length} files to sandbox...`);
+
+      // Upload files and start dev server
+      const response = await fetch('/api/beam/sandbox/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: activeProjectId,
+          files: dappFiles,
+          auto_start: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to deploy project');
+      }
+
+      // Wait a moment for server to start
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Fetch the new sandbox URL
+      const sandboxResponse = await fetch(`/api/beam/sandbox/${activeProjectId}`);
+      if (sandboxResponse.ok) {
+        const data = await sandboxResponse.json();
+        if (data && data.url) {
+          setIframeUrl(data.url);
+          console.log('Project deployed successfully:', data.url);
+        }
+      }
+    } catch (err) {
+      console.error('Deploy error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to deploy project');
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
   if (!activeProjectId) {
     return (
       <div className="h-full bg-gray-900 flex items-center justify-center p-8">
@@ -135,13 +194,60 @@ export const PreviewPanel: React.FC = () => {
   }
 
   if (!iframeUrl) {
+    // Check if there are dApp files
+    const hasDappFiles = files.some((f) => f.path.startsWith('/dapp/'));
+
     return (
       <div className="h-full bg-gray-900 flex items-center justify-center p-8">
         <div className="text-center max-w-md">
           <p className="text-gray-400 mb-4">No preview available</p>
-          <p className="text-gray-500 text-sm">
-            Create files in the dapp/ folder to deploy your frontend
-          </p>
+          {hasDappFiles ? (
+            <>
+              <p className="text-gray-500 text-sm mb-6">
+                {error
+                  ? 'Deployment failed. Try again or check the console for details.'
+                  : 'Your dApp files are ready. Deploy them to start the preview.'
+                }
+              </p>
+              <button
+                onClick={handleDeployProject}
+                disabled={isDeploying}
+                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
+              >
+                {isDeploying ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>Deploying...</span>
+                  </>
+                ) : error ? (
+                  <>
+                    <RotateCcw size={18} />
+                    <span>Retry Deploy</span>
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink size={18} />
+                    <span>Deploy Project</span>
+                  </>
+                )}
+              </button>
+              {error && (
+                <div className="mt-4 p-3 bg-red-900/20 border border-red-700/30 rounded-lg">
+                  <p className="text-red-400 text-sm font-medium mb-1">Deployment Error</p>
+                  <p className="text-red-300 text-xs">{error}</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-gray-500 text-sm mb-4">
+                Create files in the /dapp/ folder to deploy your frontend.
+              </p>
+              <p className="text-xs text-gray-600">
+                Tip: Use the AI Agent tab and say "create a Next.js app" or "bootstrap my project"
+              </p>
+            </>
+          )}
         </div>
       </div>
     );

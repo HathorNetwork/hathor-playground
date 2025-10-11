@@ -202,8 +202,45 @@ export const AgenticChat: React.FC = () => {
         return <Search size={14} className="text-yellow-400" />;
       case 'get_project_structure':
         return <Terminal size={14} className="text-cyan-400" />;
+      case 'bootstrap_nextjs_project':
+        return <Sparkles size={14} className="text-pink-400" />;
+      case 'download_sandbox_files':
+        return <FileCode size={14} className="text-orange-400" />;
+      case 'run_command':
+        return <Terminal size={14} className="text-red-400" />;
+      case 'get_sandbox_logs':
+        return <Terminal size={14} className="text-blue-300" />;
+      case 'restart_dev_server':
+        return <Terminal size={14} className="text-green-300" />;
       default:
         return <Terminal size={14} className="text-gray-400" />;
+    }
+  };
+
+  const getToolLabel = (toolName: string): string => {
+    switch (toolName) {
+      case 'bootstrap_nextjs_project':
+        return '🚀 Criando projeto Next.js';
+      case 'list_files':
+        return '📂 Listando arquivos';
+      case 'read_file':
+        return '📖 Lendo arquivo';
+      case 'write_file':
+        return '✏️ Escrevendo arquivo';
+      case 'grep':
+        return '🔍 Buscando no código';
+      case 'get_project_structure':
+        return '🗂️ Analisando estrutura';
+      case 'download_sandbox_files':
+        return '⬇️ Baixando arquivos do sandbox';
+      case 'run_command':
+        return '⚙️ Executando comando';
+      case 'get_sandbox_logs':
+        return '📋 Obtendo logs';
+      case 'restart_dev_server':
+        return '🔄 Reiniciando servidor';
+      default:
+        return `🔧 ${toolName}`;
     }
   };
 
@@ -283,19 +320,39 @@ export const AgenticChat: React.FC = () => {
 
                 {/* Tool Calls */}
                 {msg.tool_calls && msg.tool_calls.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {msg.tool_calls.map((tool, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center gap-2 text-xs bg-gray-900/50 rounded px-2 py-1"
-                      >
-                        {getToolIcon(tool.tool)}
-                        <span className="text-gray-400">{tool.tool}</span>
-                        <span className="text-gray-600">
-                          ({Object.keys(tool.args || {}).join(', ')})
-                        </span>
-                      </div>
-                    ))}
+                  <div className="mt-3 pt-3 border-t border-gray-700/50">
+                    <div className="text-xs text-gray-500 mb-2 font-semibold">
+                      🔧 Ações executadas:
+                    </div>
+                    <div className="space-y-1.5">
+                      {msg.tool_calls.map((tool, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-start gap-2 text-xs bg-gray-900/50 rounded-lg px-3 py-2 border border-gray-700/30"
+                        >
+                          <div className="mt-0.5">{getToolIcon(tool.tool)}</div>
+                          <div className="flex-1">
+                            <div className="text-gray-300 font-medium mb-0.5">
+                              {getToolLabel(tool.tool)}
+                            </div>
+                            {Object.keys(tool.args || {}).length > 0 && (
+                              <div className="text-gray-500 text-[10px]">
+                                {Object.entries(tool.args || {}).map(([key, value]) => (
+                                  <div key={key}>
+                                    <span className="text-gray-600">{key}:</span>{' '}
+                                    <span className="text-gray-400">
+                                      {typeof value === 'string' && value.length > 50
+                                        ? value.substring(0, 50) + '...'
+                                        : String(value)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -309,8 +366,25 @@ export const AgenticChat: React.FC = () => {
 
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-800 rounded-lg p-3">
-              <Loader2 size={16} className="animate-spin text-purple-400" />
+            <div className="bg-gray-800 rounded-lg p-4 max-w-[80%]">
+              <div className="flex items-center gap-2 mb-2">
+                <Loader2 size={16} className="animate-spin text-purple-400" />
+                <span className="text-sm text-gray-300 font-medium">Pensando...</span>
+              </div>
+              <div className="space-y-1 text-xs text-gray-400">
+                <div className="flex items-center gap-2 animate-pulse">
+                  <div className="w-1 h-1 rounded-full bg-purple-400"></div>
+                  <span>Analisando projeto...</span>
+                </div>
+                <div className="flex items-center gap-2 animate-pulse" style={{ animationDelay: '200ms' }}>
+                  <div className="w-1 h-1 rounded-full bg-blue-400"></div>
+                  <span>Planejando ações...</span>
+                </div>
+                <div className="flex items-center gap-2 animate-pulse" style={{ animationDelay: '400ms' }}>
+                  <div className="w-1 h-1 rounded-full bg-green-400"></div>
+                  <span>Gerando código...</span>
+                </div>
+              </div>
             </div>
           </div>
         )}
