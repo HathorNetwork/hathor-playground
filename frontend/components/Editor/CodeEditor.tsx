@@ -105,6 +105,98 @@ export const CodeEditor: React.FC = () => {
         return { suggestions };
       },
     });
+
+    // Configure TypeScript/React autocomplete for Hathor dApp development
+    monaco.languages.registerCompletionItemProvider('typescript', {
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn
+        };
+
+        const suggestions = [
+          {
+            label: 'useInvokeSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const invokeSnap = useInvokeSnap();',
+            documentation: 'Hook to invoke Hathor Snap RPC methods',
+            range
+          },
+          {
+            label: 'useRequestSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const requestSnap = useRequestSnap();',
+            documentation: 'Hook to connect/install Hathor Snap',
+            range
+          },
+          {
+            label: 'htr_sendTransaction',
+            kind: monaco.languages.CompletionItemKind.Method,
+            insertText: `invokeSnap({
+  method: 'htr_sendTransaction',
+  params: {
+    network: 'mainnet',
+    outputs: [\${1}]
+  }
+})`,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Send HTR transaction',
+            range
+          },
+          {
+            label: 'htr_getBalance',
+            kind: monaco.languages.CompletionItemKind.Method,
+            insertText: `invokeSnap({
+  method: 'htr_getBalance',
+  params: {
+    network: 'mainnet',
+    tokens: ['00']
+  }
+})`,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Get wallet balance',
+            range
+          },
+        ];
+
+        return { suggestions };
+      },
+    });
+
+    // Same autocomplete for typescriptreact (TSX)
+    monaco.languages.registerCompletionItemProvider('typescriptreact', {
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn
+        };
+
+        const suggestions = [
+          {
+            label: 'useInvokeSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const invokeSnap = useInvokeSnap();',
+            documentation: 'Hook to invoke Hathor Snap RPC methods',
+            range
+          },
+          {
+            label: 'useRequestSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const requestSnap = useRequestSnap();',
+            documentation: 'Hook to connect/install Hathor Snap',
+            range
+          },
+        ];
+
+        return { suggestions };
+      },
+    });
   };
 
   const handleChange = (value: string | undefined) => {
