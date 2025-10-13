@@ -19,6 +19,7 @@ router = APIRouter()
 # Global execution tracking for polling
 execution_status: Dict[str, Dict[str, Any]] = {}
 
+
 class ExecutionStatus(BaseModel):
     """Status of an ongoing execution"""
     execution_id: str
@@ -1484,7 +1485,8 @@ async def agentic_chat(request: AgenticChatRequest, http_request: Request):
             )
 
         # Initialize file tools with project_id for sandbox operations
-        file_tools = FileTools(request.files.copy(), project_id=request.project_id)
+        file_tools = FileTools(request.files.copy(),
+                               project_id=request.project_id)
 
         # Create agent with tools
         agent = Agent(
@@ -1543,7 +1545,7 @@ async def agentic_chat(request: AgenticChatRequest, http_request: Request):
             use_typescript: bool = True,
             use_tailwind: bool = True
         ) -> str:
-            """Bootstrap a new Next.js project using create-next-app (MUCH faster than manual file creation!)"""
+            """Bootstrap a new Next.js project using create-next-app"""
             return await ctx.deps.bootstrap_nextjs_project(use_typescript, use_tailwind)
 
         @agent.tool
@@ -1588,9 +1590,11 @@ async def agentic_chat(request: AgenticChatRequest, http_request: Request):
             sandbox_info = await beam_service.get_sandbox_info(request.project_id)
             if sandbox_info:
                 sandbox_url = sandbox_info.get('url')
-                logger.info("Retrieved sandbox URL", url=sandbox_url, project_id=request.project_id)
+                logger.info("Retrieved sandbox URL", url=sandbox_url,
+                            project_id=request.project_id)
         except Exception as e:
-            logger.warning("Failed to get sandbox URL", error=str(e), project_id=request.project_id)
+            logger.warning("Failed to get sandbox URL",
+                           error=str(e), project_id=request.project_id)
 
         return AgenticChatResponse(
             success=True,
