@@ -1,61 +1,39 @@
-# Frontend Dockerfile - Multi-stage build for Next.js SSR
-FROM node:18-alpine AS builder
+# Frontend Dockerfile - Static HTML with nginx
+FROM nginx:alpine
 
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package.json package-lock.json* ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source code
-COPY . .
-
-# Build arguments for configurable API URL
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/}
-
-# Set environment for production build
-ENV NEXT_TELEMETRY_DISABLED=1
-
-# Update modules before building
-RUN npm run update-modules
-
-# Build the application
-RUN npm run build
-
-# Production stage
-FROM node:18-alpine AS runner
-
-# Install curl for health checks and other utilities
+# Install curl for health checks
 RUN apk add --no-cache curl
 
-# Set working directory
-WORKDIR /app
+# Remove default nginx configuration
+RUN rm -rf /usr/share/nginx/html/*
 
-# Build arguments for runtime configuration
-ARG NEXT_PUBLIC_API_URL
+# Copy static files
+COPY index.html /usr/share/nginx/html/
 
-# Set environment
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/}
-
-# Copy built application
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-# Copy public directory (includes hathor-modules.json.gz)
-COPY --from=builder /app/public ./public
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -G nodejs && \
-    chown -R nextjs:nodejs /app
-
-# Switch to non-root user
-USER nextjs
+# Create nginx configuration for better security and performance
+RUN echo 'server { \
+    listen 3000; \
+    listen [::]:3000; \
+    server_name _; \
+    root /usr/share/nginx/html; \
+    index index.html; \
+    \
+    # Security headers \
+    add_header X-Frame-Options "SAMEORIGIN" always; \
+    add_header X-Content-Type-Options "nosniff" always; \
+    add_header X-XSS-Protection "1; mode=block" always; \
+    \
+    # Serve static files \
+    location / { \
+        try_files $uri $uri/ /index.html; \
+    } \
+    \
+    # Cache static assets \
+    location ~* \.(png|jpg|jpeg|gif|ico|svg)$ { \
+        expires 30d; \
+        add_header Cache-Control "public, immutable"; \
+    } \
+}' > /etc/nginx/conf.d/default.conf
 
 # Expose port
 EXPOSE 3000
@@ -64,8 +42,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/ || exit 1
 
-# Set hostname to 0.0.0.0 to accept connections from outside the container
-ENV HOSTNAME=0.0.0.0
-
-# Start Next.js
-CMD ["node", "server.js"]
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
