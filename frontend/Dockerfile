@@ -12,8 +12,8 @@ COPY index.html /usr/share/nginx/html/
 
 # Create nginx configuration for better security and performance
 RUN echo 'server { \
-    listen 80; \
-    listen [::]:80; \
+    listen 3000; \
+    listen [::]:3000; \
     server_name _; \
     root /usr/share/nginx/html; \
     index index.html; \
@@ -36,11 +36,11 @@ RUN echo 'server { \
 }' > /etc/nginx/conf.d/default.conf
 
 # Expose port
-EXPOSE 80
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost/ || exit 1
+    CMD curl -f http://localhost:3000/ || exit 1
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]
