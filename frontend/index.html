@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hathor Playground - Coming Soon</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Fira Code', monospace;
+            background: linear-gradient(135deg, #0a0618 0%, #1a0f3a 50%, #2a1551 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(147, 51, 234, 0.02) 2px,
+                    rgba(147, 51, 234, 0.02) 4px
+                );
+            pointer-events: none;
+        }
+        
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 800px;
+            animation: glitch 2s infinite;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .logo {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 2rem;
+            filter: drop-shadow(0 0 20px rgba(147, 51, 234, 0.6)) brightness(1.2);
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 2rem;
+            color: #b794f6;
+            text-shadow: 
+                0 0 5px rgba(183, 148, 246, 0.5),
+                0 0 10px rgba(147, 51, 234, 0.3);
+            letter-spacing: 2px;
+            animation: flicker 1.5s infinite alternate;
+        }
+        
+        .message {
+            color: #ffffff;
+            font-size: 1.2rem;
+            line-height: 2;
+            margin-bottom: 1.5rem;
+            text-shadow: 0 0 2px rgba(147, 51, 234, 0.3);
+        }
+        
+        .subtext {
+            color: #a0aec0;
+            font-size: 1rem;
+            line-height: 1.8;
+            opacity: 0.9;
+            animation: fadeInOut 3s ease-in-out infinite;
+        }
+        
+        @keyframes glitch {
+            0%, 100% {
+                transform: translate(0);
+            }
+            20% {
+                transform: translate(-1px, 1px);
+            }
+            40% {
+                transform: translate(-1px, -1px);
+            }
+            60% {
+                transform: translate(1px, 1px);
+            }
+            80% {
+                transform: translate(1px, -1px);
+            }
+        }
+        
+        @keyframes flicker {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.8;
+            }
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+        
+        @keyframes fadeInOut {
+            0%, 100% {
+                opacity: 0.9;
+            }
+            50% {
+                opacity: 0.6;
+            }
+        }
+        
+        /* Terminal-like effect */
+        .terminal-cursor::after {
+            content: '_';
+            display: inline-block;
+            animation: blink 1s infinite;
+            color: #b794f6;
+            font-weight: bold;
+        }
+        
+        @keyframes blink {
+            0%, 50% {
+                opacity: 1;
+            }
+            51%, 100% {
+                opacity: 0;
+            }
+        }
+        
+        /* Responsive design */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8rem;
+            }
+            
+            .message {
+                font-size: 1rem;
+            }
+            
+            .subtext {
+                font-size: 0.9rem;
+            }
+            
+            .logo {
+                width: 100px;
+                height: 100px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <img src="https://hathor.network/wp-content/uploads/2023/04/Vector-24.svg" alt="Hathor Playground Logo">
+        </div>
+        <h1>👀 You found something we weren't ready to show just yet!</h1>
+        <p class="message">
+            Congrats, Hathor explorer — you've unlocked a hidden feature.
+        </p>
+        <p class="subtext">
+            It's still in our secret workshop, so we've hidden it again for now. 
+            Stay tuned — you'll be the first to know when it's live<span class="terminal-cursor"></span>
+        </p>
+    </div>
+</body>
+</html>
