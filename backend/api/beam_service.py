@@ -1,6 +1,7 @@
 """
 Beam Cloud service for managing dApp sandboxes
 """
+
 import tempfile
 import os
 from pathlib import Path
@@ -9,9 +10,9 @@ import structlog
 
 # Set Beam API key from environment
 # This must be set before importing beam
-beam_api_key = os.getenv('BEAM_API_KEY')
+beam_api_key = os.getenv("BEAM_API_KEY")
 if beam_api_key:
-    os.environ['BEAM_API_KEY'] = beam_api_key
+    os.environ["BEAM_API_KEY"] = beam_api_key
 else:
     logger = structlog.get_logger()
     logger.warning("BEAM_API_KEY not set - Beam SDK may fail to authenticate")
@@ -24,10 +25,12 @@ logger = structlog.get_logger()
 image = (
     Image()
     .from_registry("node:20")
-    .add_commands([
-        "apt-get update && apt-get install -y git curl",
-        "npm install -g pnpm",
-    ])
+    .add_commands(
+        [
+            "apt-get update && apt-get install -y git curl",
+            "npm install -g pnpm",
+        ]
+    )
 )
 
 DEFAULT_CODE_PATH = "/app"
@@ -75,7 +78,7 @@ class BeamService:
                 "Sandbox created successfully",
                 project_id=project_id,
                 sandbox_id=sandbox_id,
-                url=url
+                url=url,
             )
 
             return {
@@ -85,7 +88,9 @@ class BeamService:
             }
 
         except Exception as e:
-            logger.error("Failed to create sandbox", project_id=project_id, error=str(e))
+            logger.error(
+                "Failed to create sandbox", project_id=project_id, error=str(e)
+            )
             raise
 
     async def get_sandbox(self, project_id: str) -> Optional[Sandbox]:
@@ -111,13 +116,15 @@ class BeamService:
                 "Failed to connect to sandbox",
                 project_id=project_id,
                 sandbox_id=sandbox_id,
-                error=str(e)
+                error=str(e),
             )
             # Remove invalid sandbox from cache
             del self.sandboxes[project_id]
             return None
 
-    async def upload_files(self, project_id: str, files: Dict[str, str], auto_start: bool = True) -> Dict[str, str]:
+    async def upload_files(
+        self, project_id: str, files: Dict[str, str], auto_start: bool = True
+    ) -> Dict[str, str]:
         """
         Upload files to project sandbox
 
@@ -136,23 +143,25 @@ class BeamService:
             sandbox = await self.get_sandbox(project_id)
 
         if not sandbox:
-            raise ValueError(f"Could not get or create sandbox for project {project_id}")
+            raise ValueError(
+                f"Could not get or create sandbox for project {project_id}"
+            )
 
         logger.info(
-            "Uploading files to sandbox",
-            project_id=project_id,
-            file_count=len(files)
+            "Uploading files to sandbox", project_id=project_id, file_count=len(files)
         )
 
         try:
             for sandbox_path, content in files.items():
                 # Convert /dapp/... paths to /app/...
-                if sandbox_path.startswith('/dapp/'):
-                    sandbox_path = sandbox_path.replace('/dapp/', f'{DEFAULT_CODE_PATH}/')
+                if sandbox_path.startswith("/dapp/"):
+                    sandbox_path = sandbox_path.replace(
+                        "/dapp/", f"{DEFAULT_CODE_PATH}/"
+                    )
                 elif not sandbox_path.startswith(DEFAULT_CODE_PATH):
                     sandbox_path = f"{DEFAULT_CODE_PATH}{sandbox_path}"
 
-                with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
+                with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
                     temp_file.write(content)
                     temp_file_path = temp_file.name
 
@@ -180,25 +189,27 @@ class BeamService:
 
             # Auto-start dev server if not already running and auto_start is True
             if auto_start and project_id not in self.processes:
-                logger.info("Auto-starting dev server after file upload", project_id=project_id)
+                logger.info(
+                    "Auto-starting dev server after file upload", project_id=project_id
+                )
                 try:
                     await self.start_dev_server(project_id)
                 except Exception as e:
-                    logger.warning("Failed to auto-start dev server", project_id=project_id, error=str(e))
+                    logger.warning(
+                        "Failed to auto-start dev server",
+                        project_id=project_id,
+                        error=str(e),
+                    )
                     # Don't fail the upload if dev server fails to start
 
             return {
                 "status": "success",
                 "project_id": project_id,
-                "files_uploaded": len(files)
+                "files_uploaded": len(files),
             }
 
         except Exception as e:
-            logger.error(
-                "Failed to upload files",
-                project_id=project_id,
-                error=str(e)
-            )
+            logger.error("Failed to upload files", project_id=project_id, error=str(e))
             raise
 
     async def start_dev_server(self, project_id: str) -> Dict[str, str]:
@@ -221,7 +232,9 @@ class BeamService:
             # Check if package.json exists and install dependencies if needed
             try:
                 sandbox.fs.stat_file(f"{DEFAULT_CODE_PATH}/package.json")
-                logger.info("Found package.json, installing dependencies", project_id=project_id)
+                logger.info(
+                    "Found package.json, installing dependencies", project_id=project_id
+                )
                 # Install dependencies in background (non-blocking)
                 install_cmd = f"cd {DEFAULT_CODE_PATH} && pnpm install"
                 install_process = sandbox.process.exec("sh", "-c", install_cmd)
@@ -229,7 +242,10 @@ class BeamService:
                 install_process.wait()
                 logger.info("Dependencies installed", project_id=project_id)
             except Exception:
-                logger.info("No package.json found, skipping dependency installation", project_id=project_id)
+                logger.info(
+                    "No package.json found, skipping dependency installation",
+                    project_id=project_id,
+                )
 
             # Start Next.js dev server using sandbox process API
             dev_cmd = f"cd {DEFAULT_CODE_PATH} && npx next dev --port {DEFAULT_PORT}"
@@ -247,17 +263,11 @@ class BeamService:
 
             logger.info("Dev server started", project_id=project_id, url=url)
 
-            return {
-                "status": "success",
-                "url": url,
-                "project_id": project_id
-            }
+            return {"status": "success", "url": url, "project_id": project_id}
 
         except Exception as e:
             logger.error(
-                "Failed to start dev server",
-                project_id=project_id,
-                error=str(e)
+                "Failed to start dev server", project_id=project_id, error=str(e)
             )
             raise
 
@@ -286,13 +296,11 @@ class BeamService:
             return {
                 "sandbox_id": sandbox.sandbox_id(),
                 "url": url,
-                "project_id": project_id
+                "project_id": project_id,
             }
         except Exception as e:
             logger.error(
-                "Failed to get sandbox info",
-                project_id=project_id,
-                error=str(e)
+                "Failed to get sandbox info", project_id=project_id, error=str(e)
             )
             return None
 
@@ -317,14 +325,12 @@ class BeamService:
             for log_line in process.logs:
                 yield log_line
         except Exception as e:
-            logger.error(
-                "Failed to stream logs",
-                project_id=project_id,
-                error=str(e)
-            )
+            logger.error("Failed to stream logs", project_id=project_id, error=str(e))
             yield f"Error streaming logs: {str(e)}\n"
 
-    async def run_command(self, project_id: str, command: str, timeout: int = 30) -> Dict[str, str]:
+    async def run_command(
+        self, project_id: str, command: str, timeout: int = 30
+    ) -> Dict[str, str]:
         """
         Execute a command in the sandbox and return output
 
@@ -343,7 +349,9 @@ class BeamService:
         if not sandbox:
             raise ValueError(f"No sandbox found for project {project_id}")
 
-        logger.info("Running command in sandbox", project_id=project_id, command=command)
+        logger.info(
+            "Running command in sandbox", project_id=project_id, command=command
+        )
 
         try:
             # Execute command in /app directory
@@ -372,14 +380,14 @@ class BeamService:
                 "Command completed",
                 project_id=project_id,
                 command=command,
-                output_length=len(stdout) + len(stderr)
+                output_length=len(stdout) + len(stderr),
             )
 
             return {
                 "stdout": stdout,
                 "stderr": stderr,
                 "exit_code": "0",  # Beam doesn't expose exit code directly
-                "command": command
+                "command": command,
             }
 
         except Exception as e:
@@ -387,13 +395,13 @@ class BeamService:
                 "Failed to run command",
                 project_id=project_id,
                 command=command,
-                error=str(e)
+                error=str(e),
             )
             return {
                 "stdout": "",
                 "stderr": f"Error: {str(e)}",
                 "exit_code": "1",
-                "command": command
+                "command": command,
             }
 
     async def get_recent_logs(self, project_id: str, lines: int = 50) -> str:
@@ -423,11 +431,7 @@ class BeamService:
             return "\n".join(log_lines) if log_lines else "No logs available yet."
 
         except Exception as e:
-            logger.error(
-                "Failed to get logs",
-                project_id=project_id,
-                error=str(e)
-            )
+            logger.error("Failed to get logs", project_id=project_id, error=str(e))
             return f"Error getting logs: {str(e)}"
 
     async def restart_dev_server(self, project_id: str) -> Dict[str, str]:
@@ -448,14 +452,20 @@ class BeamService:
                 # Beam processes don't have a kill method, so we just remove the reference
                 # The process will be cleaned up by Beam
                 del self.processes[project_id]
-                logger.info("Stopped existing dev server process", project_id=project_id)
+                logger.info(
+                    "Stopped existing dev server process", project_id=project_id
+                )
             except Exception as e:
-                logger.warning("Failed to stop process", project_id=project_id, error=str(e))
+                logger.warning(
+                    "Failed to stop process", project_id=project_id, error=str(e)
+                )
 
         # Start new dev server
         return await self.start_dev_server(project_id)
 
-    async def download_files(self, project_id: str, path: str = DEFAULT_CODE_PATH) -> Dict[str, str]:
+    async def download_files(
+        self, project_id: str, path: str = DEFAULT_CODE_PATH
+    ) -> Dict[str, str]:
         """
         Download files from sandbox back to backend (bidirectional sync)
 
@@ -491,17 +501,24 @@ class BeamService:
                 if file_path and file_path.startswith(path):
                     file_paths.append(file_path)
 
-            logger.info(f"Found {len(file_paths)} files to download", project_id=project_id)
+            logger.info(
+                f"Found {len(file_paths)} files to download", project_id=project_id
+            )
 
             # Download each file
             for sandbox_file_path in file_paths:
                 try:
                     # Skip node_modules and .next directories
-                    if 'node_modules' in sandbox_file_path or '/.next/' in sandbox_file_path:
+                    if (
+                        "node_modules" in sandbox_file_path
+                        or "/.next/" in sandbox_file_path
+                    ):
                         continue
 
                     # Download file to temp location
-                    with tempfile.NamedTemporaryFile(mode='r', delete=False) as temp_file:
+                    with tempfile.NamedTemporaryFile(
+                        mode="r", delete=False
+                    ) as temp_file:
                         temp_file_path = temp_file.name
 
                     try:
@@ -509,14 +526,20 @@ class BeamService:
                         sandbox.fs.download_file(sandbox_file_path, temp_file_path)
 
                         # Read content
-                        with open(temp_file_path, 'r', encoding='utf-8') as f:
+                        with open(temp_file_path, "r", encoding="utf-8") as f:
                             content = f.read()
 
                         # Convert /app/... paths to /dapp/...
-                        frontend_path = sandbox_file_path.replace(f'{DEFAULT_CODE_PATH}/', '/dapp/')
+                        frontend_path = sandbox_file_path.replace(
+                            f"{DEFAULT_CODE_PATH}/", "/dapp/"
+                        )
                         files[frontend_path] = content
 
-                        logger.debug("Downloaded file", sandbox_path=sandbox_file_path, frontend_path=frontend_path)
+                        logger.debug(
+                            "Downloaded file",
+                            sandbox_path=sandbox_file_path,
+                            frontend_path=frontend_path,
+                        )
 
                     finally:
                         # Clean up temp file
@@ -525,9 +548,7 @@ class BeamService:
 
                 except Exception as e:
                     logger.warning(
-                        "Failed to download file",
-                        file=sandbox_file_path,
-                        error=str(e)
+                        "Failed to download file", file=sandbox_file_path, error=str(e)
                     )
                     # Continue with other files
                     continue
@@ -535,16 +556,14 @@ class BeamService:
             logger.info(
                 "Files downloaded successfully",
                 project_id=project_id,
-                file_count=len(files)
+                file_count=len(files),
             )
 
             return files
 
         except Exception as e:
             logger.error(
-                "Failed to download files",
-                project_id=project_id,
-                error=str(e)
+                "Failed to download files", project_id=project_id, error=str(e)
             )
             raise
 
@@ -554,7 +573,7 @@ class BeamService:
         app_name: str = "dapp",
         use_typescript: bool = True,
         use_tailwind: bool = True,
-        use_app_router: bool = True
+        use_app_router: bool = True,
     ) -> Dict[str, str]:
         """
         Bootstrap a new Next.js project using create-next-app and return generated files
@@ -579,9 +598,13 @@ class BeamService:
             sandbox = await self.get_sandbox(project_id)
 
         if not sandbox:
-            raise ValueError(f"Could not get or create sandbox for project {project_id}")
+            raise ValueError(
+                f"Could not get or create sandbox for project {project_id}"
+            )
 
-        logger.info("Bootstrapping Next.js project", project_id=project_id, app_name=app_name)
+        logger.info(
+            "Bootstrapping Next.js project", project_id=project_id, app_name=app_name
+        )
 
         try:
             # Build create-next-app command with flags (fully non-interactive)
@@ -611,10 +634,12 @@ class BeamService:
             else:
                 cmd_parts.append("--no-app")
 
-            cmd_parts.extend([
-                "--no-src-dir",  # Don't use src/ directory
-                "--import-alias '@/*'",  # Use @/* import alias
-            ])
+            cmd_parts.extend(
+                [
+                    "--no-src-dir",  # Don't use src/ directory
+                    "--import-alias '@/*'",  # Use @/* import alias
+                ]
+            )
 
             create_cmd = " ".join(cmd_parts)
 
@@ -631,8 +656,14 @@ class BeamService:
                 logger.debug(f"create-next-app: {log_line.strip()}")
 
             # Check if create-next-app succeeded
-            if not any("success" in line.lower() or "created" in line.lower() for line in output_lines):
-                logger.warning("create-next-app may have failed", output="\n".join(output_lines[-10:]))
+            if not any(
+                "success" in line.lower() or "created" in line.lower()
+                for line in output_lines
+            ):
+                logger.warning(
+                    "create-next-app may have failed",
+                    output="\n".join(output_lines[-10:]),
+                )
 
             # List what was created in /tmp
             ls_tmp_cmd = f"ls -la /tmp/{app_name}"
@@ -665,7 +696,7 @@ class BeamService:
             logger.info(
                 "Next.js bootstrap completed",
                 project_id=project_id,
-                file_count=len(files)
+                file_count=len(files),
             )
 
             return files
@@ -674,7 +705,7 @@ class BeamService:
             logger.error(
                 "Failed to bootstrap Next.js project",
                 project_id=project_id,
-                error=str(e)
+                error=str(e),
             )
             raise
 
