@@ -299,6 +299,27 @@ export interface AgenticChatResponse {
   error?: string;
 }
 
+export type EnvironmentType = 'blueprint' | 'dapp' | 'mixed' | 'empty';
+
+export interface UnifiedChatRequest {
+  readonly message: string;
+  readonly project_id: string;
+  readonly files: Record<string, string>;
+  readonly conversation_history?: ReadonlyArray<{ role: string; content: string }>;
+  readonly force_environment?: EnvironmentType;
+}
+
+export interface UnifiedChatResponse {
+  readonly success: boolean;
+  readonly message: string;
+  readonly environment: EnvironmentType;
+  readonly confidence: number;
+  readonly tool_calls: ToolCall[];
+  readonly updated_files: Record<string, string>;
+  readonly sandbox_url?: string;
+  readonly error?: string;
+}
+
 export const aiApi = {
   chat: async (request: ChatRequest): Promise<ChatResponse> => {
     const response = await api.post('/api/ai/chat', request);
@@ -322,6 +343,11 @@ export const aiApi = {
 
   agenticChat: async (request: AgenticChatRequest): Promise<AgenticChatResponse> => {
     const response = await api.post('/api/ai/agentic-chat', request);
+    return response.data;
+  },
+
+  unifiedChat: async (request: UnifiedChatRequest): Promise<UnifiedChatResponse> => {
+    const response = await api.post('/api/ai/unified-chat', request);
     return response.data;
   },
 };

@@ -48,7 +48,9 @@ def get_ai_model():
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("Google API key not configured")
-        return GeminiModel("gemini-1.5-flash", api_key=api_key)
+        # Set the API key in environment for Gemini
+        os.environ["GOOGLE_API_KEY"] = api_key
+        return GeminiModel("gemini-2.5-flash")
     else:
         raise ValueError(f"Unsupported AI provider: {provider}")
 

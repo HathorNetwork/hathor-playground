@@ -1,11 +1,15 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, Loader2, FileCode, Terminal, Search, FileText, Trash2 } from 'lucide-react';
+import { Sparkles, Send, Loader2, Trash2 } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 import { aiApi, type ToolCall } from '@/lib/api';
 import type { File } from '@/store/ide-store';
 import { beamClient } from '@/lib/beam-client';
+import { ChatMessage } from './ChatMessage';
+
+// Feature flag: Use unified chat endpoint (supports both blueprints and dApps)
+const USE_UNIFIED_CHAT = process.env.NEXT_PUBLIC_USE_UNIFIED_CHAT === 'true';
 
 interface ChatMessage {
   id: string;
@@ -13,6 +17,8 @@ interface ChatMessage {
   content: string;
   tool_calls?: ToolCall[];
   timestamp: Date;
+  environment?: string;  // For unified chat
+  confidence?: number;    // For unified chat
 }
 
 export const AgenticChat: React.FC = () => {
@@ -92,13 +98,20 @@ export const AgenticChat: React.FC = () => {
         content: msg.content,
       }));
 
-      // Call agentic chat API with conversation history
-      const response = await aiApi.agenticChat({
-        message: input,
-        project_id: activeProjectId,
-        files: filesMap,
-        conversation_history: conversationHistory,
-      });
+      // Call unified chat API or agentic chat based on feature flag
+      const response = USE_UNIFIED_CHAT
+        ? await aiApi.unifiedChat({
+            message: input,
+            project_id: activeProjectId,
+            files: filesMap,
+            conversation_history: conversationHistory,
+          })
+        : await aiApi.agenticChat({
+            message: input,
+            project_id: activeProjectId,
+            files: filesMap,
+            conversation_history: conversationHistory,
+          });
 
       if (response.success) {
         // Add assistant message
@@ -108,9 +121,17 @@ export const AgenticChat: React.FC = () => {
           content: response.message,
           tool_calls: response.tool_calls,
           timestamp: new Date(),
+          environment: 'environment' in response ? response.environment : undefined,
+          confidence: 'confidence' in response ? response.confidence : undefined,
         };
 
         setMessages((prev) => [...prev, assistantMessage]);
+
+        // Log environment detection if using unified chat
+        if (USE_UNIFIED_CHAT && 'environment' in response) {
+          const confidencePercent = Math.round((response.confidence || 0) * 100);
+          addConsoleMessage('info', `🔍 Detected: ${response.environment} (${confidencePercent}% confidence)`);
+        }
 
         // Handle updated files
         if (Object.keys(response.updated_files).length > 0) {
@@ -190,60 +211,6 @@ export const AgenticChat: React.FC = () => {
     return 'typescript';
   };
 
-  const getToolIcon = (toolName: string) => {
-    switch (toolName) {
-      case 'list_files':
-        return <FileCode size={14} className="text-blue-400" />;
-      case 'read_file':
-        return <FileText size={14} className="text-green-400" />;
-      case 'write_file':
-        return <FileText size={14} className="text-purple-400" />;
-      case 'grep':
-        return <Search size={14} className="text-yellow-400" />;
-      case 'get_project_structure':
-        return <Terminal size={14} className="text-cyan-400" />;
-      case 'bootstrap_nextjs_project':
-        return <Sparkles size={14} className="text-pink-400" />;
-      case 'download_sandbox_files':
-        return <FileCode size={14} className="text-orange-400" />;
-      case 'run_command':
-        return <Terminal size={14} className="text-red-400" />;
-      case 'get_sandbox_logs':
-        return <Terminal size={14} className="text-blue-300" />;
-      case 'restart_dev_server':
-        return <Terminal size={14} className="text-green-300" />;
-      default:
-        return <Terminal size={14} className="text-gray-400" />;
-    }
-  };
-
-  const getToolLabel = (toolName: string): string => {
-    switch (toolName) {
-      case 'bootstrap_nextjs_project':
-        return '🚀 Criando projeto Next.js';
-      case 'list_files':
-        return '📂 Listando arquivos';
-      case 'read_file':
-        return '📖 Lendo arquivo';
-      case 'write_file':
-        return '✏️ Escrevendo arquivo';
-      case 'grep':
-        return '🔍 Buscando no código';
-      case 'get_project_structure':
-        return '🗂️ Analisando estrutura';
-      case 'download_sandbox_files':
-        return '⬇️ Baixando arquivos do sandbox';
-      case 'run_command':
-        return '⚙️ Executando comando';
-      case 'get_sandbox_logs':
-        return '📋 Obtendo logs';
-      case 'restart_dev_server':
-        return '🔄 Reiniciando servidor';
-      default:
-        return `🔧 ${toolName}`;
-    }
-  };
-
   if (!activeProjectId) {
     return (
       <div className="h-full bg-gray-900 flex items-center justify-center p-8">
@@ -308,59 +275,14 @@ export const AgenticChat: React.FC = () => {
           </div>
         ) : (
           messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[80%] rounded-lg p-3 ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800 text-gray-100'
-                }`}
-              >
-                <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
-
-                {/* Tool Calls */}
-                {msg.tool_calls && msg.tool_calls.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-700/50">
-                    <div className="text-xs text-gray-500 mb-2 font-semibold">
-                      🔧 Ações executadas:
-                    </div>
-                    <div className="space-y-1.5">
-                      {msg.tool_calls.map((tool, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-start gap-2 text-xs bg-gray-900/50 rounded-lg px-3 py-2 border border-gray-700/30"
-                        >
-                          <div className="mt-0.5">{getToolIcon(tool.tool)}</div>
-                          <div className="flex-1">
-                            <div className="text-gray-300 font-medium mb-0.5">
-                              {getToolLabel(tool.tool)}
-                            </div>
-                            {Object.keys(tool.args || {}).length > 0 && (
-                              <div className="text-gray-500 text-[10px]">
-                                {Object.entries(tool.args || {}).map(([key, value]) => (
-                                  <div key={key}>
-                                    <span className="text-gray-600">{key}:</span>{' '}
-                                    <span className="text-gray-400">
-                                      {typeof value === 'string' && value.length > 50
-                                        ? value.substring(0, 50) + '...'
-                                        : String(value)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="text-xs text-gray-400 mt-2">
-                  {msg.timestamp.toLocaleTimeString()}
-                </div>
-              </div>
-            </div>
+            <ChatMessage
+              key={msg.id}
+              role={msg.role}
+              content={msg.content}
+              tool_calls={msg.tool_calls}
+              environment={msg.environment}
+              confidence={msg.confidence}
+            />
           ))
         )}
 

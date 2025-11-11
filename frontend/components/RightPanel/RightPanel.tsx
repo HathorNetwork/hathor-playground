@@ -4,6 +4,10 @@ import React, { useState } from 'react';
 import { Monitor, Sparkles } from 'lucide-react';
 import { PreviewPanel } from '../Preview/PreviewPanel';
 import { AgenticChat } from './AgenticChat';
+import { AgenticChatStreaming } from './AgenticChatStreaming';
+
+// Feature flag for streaming
+const USE_STREAMING = true;
 import { clsx } from 'clsx';
 
 type TabType = 'preview' | 'ai';
@@ -48,7 +52,7 @@ export const RightPanel: React.FC = () => {
           <PreviewPanel />
         </div>
         <div className={clsx('h-full', activeTab === 'ai' ? 'block' : 'hidden')}>
-          <AgenticChat />
+          {USE_STREAMING ? <AgenticChatStreaming /> : <AgenticChat />}
         </div>
       </div>
     </div>

@@ -196,6 +196,10 @@ async def token_limit_middleware(request: Request, call_next):
     if not request.url.path.startswith("/api/ai/"):
         return await call_next(request)
 
+    # Skip for streaming endpoints (they use StreamingResponse)
+    if request.url.path.endswith("-stream"):
+        return await call_next(request)
+
     # Get client IP
     client_ip = get_remote_address(request)
 
