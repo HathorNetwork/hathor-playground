@@ -136,113 +136,6 @@ class NegativeIncrement(NCFail):
     },
     {
       id: '2',
-      name: 'LiquidityPool.py',
-      content: `"""
-Liquidity Pool Contract - Demonstrates Hathor Blueprint SDK types and patterns
-A simple DEX liquidity pool for token swapping with proper Hathor constraints
-"""
-from hathor.nanocontracts.blueprint import Blueprint
-from hathor.nanocontracts.context import Context
-from hathor.nanocontracts.types import public, view, TokenUid, VertexId, Amount
-
-
-class LiquidityPool(Blueprint):
-    """A simple liquidity pool contract for two tokens
-    Demonstrates proper use of Hathor Blueprint SDK types
-    """
-
-    # Contract state - all fields must be initialized in initialize()
-    token_a: TokenUid
-    token_b: TokenUid
-    owner: VertexId  # Using VertexId instead of Address for IDE compatibility
-    fee_rate: int
-    total_liquidity: Amount
-
-    @public
-    def initialize(self, ctx: Context, token_a: TokenUid, token_b: TokenUid, fee_rate: int) -> None:
-        """Initialize the liquidity pool contract"""
-        self.token_a = token_a
-        self.token_b = token_b
-        self.owner = ctx.vertex.hash  # This is a 32-byte VertexId
-        self.fee_rate = fee_rate  # Fee in basis points (e.g., 30 = 0.3%)
-        self.total_liquidity = 0
-
-    @view
-    def get_tokens(self) -> tuple[TokenUid, TokenUid]:
-        """Get the two tokens in this pool"""
-        return (self.token_a, self.token_b)
-
-    @view
-    def get_owner(self) -> VertexId:
-        """Get contract owner ID"""
-        return self.owner
-
-    @view
-    def get_fee_rate(self) -> int:
-        """Get fee rate in basis points"""
-        return self.fee_rate
-
-    @view
-    def get_total_liquidity(self) -> Amount:
-        """Get total liquidity in the pool"""
-        return self.total_liquidity
-
-    @view
-    def get_pool_info(self) -> dict[str, str]:
-        """Get pool information"""
-        return {
-            "token_a": self.token_a.hex(),
-            "token_b": self.token_b.hex(),
-            "owner": self.owner.hex(),
-            "fee_rate": str(self.fee_rate),
-            "total_liquidity": str(self.total_liquidity)
-        }
-
-    @public
-    def set_fee_rate(self, ctx: Context, new_fee_rate: int) -> None:
-        """Set new fee rate (only owner)"""
-        if ctx.vertex.hash != self.owner:
-            raise ValueError("Only owner can set fee rate")
-
-        if new_fee_rate < 0 or new_fee_rate > 1000:  # Max 10%
-            raise ValueError("Fee rate must be between 0 and 1000 basis points")
-
-        self.fee_rate = new_fee_rate
-
-    @public
-    def add_liquidity(self, ctx: Context, amount: Amount) -> None:
-        """Add liquidity to the pool (simplified version)"""
-        if amount <= 0:
-            raise ValueError("Amount must be positive")
-
-        # This is a simplified version - in a real DEX you'd handle
-        # token deposits via actions and calculate LP tokens
-        self.total_liquidity += amount
-
-    @view
-    def calculate_swap_output(self, input_amount: Amount, input_token: TokenUid) -> Amount:
-        """Calculate output amount for a swap (simplified)"""
-        if input_token != self.token_a and input_token != self.token_b:
-            raise ValueError("Invalid input token")
-
-        if input_amount <= 0:
-            raise ValueError("Input amount must be positive")
-
-        # Simplified calculation - real DEX would use constant product formula
-        fee = (input_amount * self.fee_rate) // 10000
-        output_amount = input_amount - fee
-
-        return output_amount
-
-
-# This is the blueprint that will be deployed
-__blueprint__ = LiquidityPool`,
-      language: 'python',
-      path: '/contracts/LiquidityPool.py',
-      type: 'contract',
-    },
-    {
-      id: '3',
       name: 'test_simple_counter.py',
       content: `from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
 
@@ -300,14 +193,11 @@ class CounterTestCase(BlueprintTestCase):
       type: 'test',
     },
     {
-      id: '4',
+      id: '3',
       name: 'SwapDemo.py',
-      content: `from hathor.nanocontracts.blueprint import Blueprint
-from hathor.nanocontracts.context import Context
-from hathor.nanocontracts.exception import NCFail
-from hathor.nanocontracts.types import NCDepositAction, NCWithdrawalAction, TokenUid, public, view
+      content: `from hathor import Blueprint, Context, NCDepositAction, NCFail, NCWithdrawalAction, TokenUid, export, public, view
 
-
+@export
 class SwapDemo(Blueprint):
     """Blueprint to execute swaps between tokens.
     This blueprint is here just as a reference for blueprint developers, not for real use.
@@ -385,15 +275,14 @@ class InvalidActions(NCFail):
 
 class InvalidRatio(NCFail):
     pass
-
-__blueprint__ = SwapDemo`,
+      `,
       language: 'python',
       path: '/contracts/SwapDemo.py',
       type: 'contract',
     },
     {
-      id: '5',
-      name: 'test_swap.py',
+      id: '4',
+      name: 'test_swap_demo.py',
       content: `from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
 from hathor.nanocontracts.storage.contract_storage import Balance
 from hathor.nanocontracts.types import NCDepositAction, NCWithdrawalAction, TokenUid
@@ -507,9 +396,10 @@ class SwapDemoTestCase(BlueprintTestCase):
         if amount >= 0:
             return NCDepositAction
         else:
-            return NCWithdrawalAction`,
+            return NCWithdrawalAction
+`,
       language: 'python',
-      path: '/tests/test_swap.py',
+      path: '/tests/test_swap_demo.py',
       type: 'test',
     },
   ],
