@@ -47,10 +47,18 @@ def sign_openssl(nano_header, privkey):
     pass
 
 def sign_pycoin(nano_header, privkey):
-    """Mock sign function.""" 
+    """Mock sign function."""
     pass
 
 def sign_openssl_multisig(nano_header, required_count, redeem_pubkey_bytes, sign_privkeys):
     """Mock multisig sign function."""
-    pass`;
+    pass;
 
+def sha3(data: bytes) -> bytes:
+    """Calculate the SHA3-256 of some data."""
+    return hashlib.sha3_256(data).digest()
+
+def verify_ecdsa(public_key: bytes, data: bytes, signature: bytes) -> bool:
+    # TODO properly mock this function
+    return True
+`

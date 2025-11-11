@@ -94,11 +94,9 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => ({
     {
       id: '1',
       name: 'SimpleCounter.py',
-      content: `from hathor.nanocontracts import Blueprint
-from hathor.nanocontracts.context import Context
-from hathor.nanocontracts.exception import NCFail
-from hathor.nanocontracts.types import public, view
+      content: `from hathor import Blueprint, Context, NCFail, export, public, view
 
+@export
 class SimpleCounter(Blueprint):
     """A simple counter that can be incremented and read"""
 
@@ -131,8 +129,7 @@ class SimpleCounter(Blueprint):
 
 class NegativeIncrement(NCFail):
     pass
-
-__blueprint__ = SimpleCounter`,
+`,
       language: 'python',
       path: '/contracts/SimpleCounter.py',
       type: 'contract',
