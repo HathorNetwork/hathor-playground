@@ -3,6 +3,7 @@
  * Loads Pyodide directly from CDN to avoid webpack issues
  */
 
+import { HATHOR_MODULES } from './hathor-modules';
 import { MockLoader } from './mock-loader';
 import { getHathorHelpers } from '../utils/hathorHelpers';
 
@@ -16,7 +17,16 @@ interface ExecutionResult {
   tests_passed?: number;
   tests_failed?: number;
   failure_details?: string[];
-  traceback?: string;
+}
+
+interface ExecutionRequest {
+  contract_id: string;
+  method_name: string;
+  args: any[];
+  kwargs: Record<string, any>;
+  caller_address: string;
+  code?: string; // Contract code to determine method decorators
+  method_type?: string;
 }
 
 // Global Pyodide interface
@@ -66,7 +76,7 @@ class PyodideRunner {
     }
   }
 
-  private async loadPyodideScript(_version: string, baseUrl: string): Promise<void> {
+  private async loadPyodideScript(version: string, baseUrl: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = `${baseUrl}pyodide.js`;
@@ -335,6 +345,11 @@ except Exception as e:
 
 # Import the real Runner
 try:
+    # We need a MemoryNodeTrieStore for the runner, so we monkey-patch it here.
+    # We do it differently than the other mocks as MemoryNodeTrieStore depends
+    # on NodeTrieStore, which is defined on the same file as MemoryNodeTrieStore.
+    _monkeyPatchNodeTrieStore()
+
     from hathor.conf import HathorSettings
     from hathor.reactor.reactor import get_global_reactor
     from hathor.transaction.storage.transaction_storage import MockTransactionStorage
@@ -388,7 +403,8 @@ print("✅ Hathor SDK environment loaded successfully")
 `);
   }
 
-  async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string; traceback?: string }> {
+
+  async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string }> {
     // XXX Not really compiling, but will leave named like this so we don't
     // need to change everything. We are basically deploying an on-chain blueprint.
     if (!this.pyodide) {
@@ -443,16 +459,9 @@ except Exception as e:
     traceback_str = traceback.format_exc()
     print(f"❌ Contract compilation exception: {e}")
     print(f"❌ Full traceback: {traceback_str}")
-    
-    # Get the full error message with proper fallback
-    error_msg = str(e)
-    # If str(e) is empty, use the class name as fallback
-    if not error_msg or error_msg == '':
-        error_msg = f"{e.__class__.__name__}: {repr(e)}"
-    
     result = {
         'success': False,
-        'error': error_msg,
+        'error': str(e),
         'traceback': traceback_str
     }
 
@@ -467,12 +476,7 @@ json.dumps(result)
         return { success: true, blueprint_id };
       } else {
         console.error(`❌ Compilation failed:`, compilationResult.error);
-        // Include traceback if available
-        const errorResponse: any = { success: false, error: compilationResult.error };
-        if (compilationResult.traceback) {
-          errorResponse.traceback = compilationResult.traceback;
-        }
-        return errorResponse;
+        return { success: false, error: compilationResult.error };
       }
     } catch (error) {
       console.error('❌ Compilation error:', error);
@@ -487,9 +491,7 @@ json.dumps(result)
     }
 
     try {
-      const { method_name, caller_address, code, actions } = request;
-      const args = request.args ?? [];
-      const kwargs = request.kwargs ?? {};
+      const { method_name, args, caller_address, code, actions } = request;
       let { contract_id } = request;
 
       // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)
@@ -520,7 +522,7 @@ try:
         context = _create_context(caller_address='${caller_address}', actions=actions_list)
 
         # Convert arguments and kwargs from JSON to Python objects
-        args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(kwargs)}''')
+        args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(request.kwargs)}''')
 
         method_name = '${method_name}'
         method_type = '${methodType}'
@@ -583,16 +585,9 @@ except Exception as e:
     import traceback
     traceback_str = traceback.format_exc()
     print(f"❌ Method execution traceback: {traceback_str}")
-    
-    # Get the full error message with proper fallback
-    error_msg = str(e)
-    # If str(e) is empty, use the class name as fallback
-    if not error_msg or error_msg == '':
-        error_msg = f"{e.__class__.__name__}: {repr(e)}"
-    
     execution_result = {
         'success': False,
-        'error': error_msg,
+        'error': e.__class__.__name__,
         'traceback': traceback_str
     }
 
@@ -709,11 +704,7 @@ json.dumps(validation_result)
     return this.isInitialized;
   }
 
-  async runTests(
-    testContent: string,
-    testFileName: string = 'test_file.py',
-    contractFiles: Array<{ path: string; content: string; name: string }> = []
-  ): Promise<ExecutionResult> {
+  async runTests(testContent: string, testFileName: string = 'test_file.py'): Promise<ExecutionResult> {
     if (!this.pyodide) {
       await this.initialize();
     }
@@ -721,103 +712,8 @@ json.dumps(validation_result)
     try {
       console.log('🧪 Running pytest on test file...');
 
-      // Create contract files in the filesystem so imports work naturally
-      for (const contractFile of contractFiles) {
-        const fileName = contractFile.name;
-
-        // Extract directory path (e.g., "/contracts/" or "/blueprints/")
-        const dirMatch = contractFile.path.match(/^\/(contracts|blueprints)\//);
-        if (dirMatch) {
-          const dirName = dirMatch[1]; // "contracts" or "blueprints"
-
-          // Create the directory if it doesn't exist
-          try {
-            this.pyodide.FS.mkdir(`/tmp/${dirName}`);
-          } catch (e) {
-            // Directory might already exist, ignore error
-          }
-
-          // Write the contract file in the subdirectory (for "from contracts.X import ...")
-          this.pyodide.FS.writeFile(`/tmp/${dirName}/${fileName}`, contractFile.content, { encoding: 'utf8' });
-          console.log(`📝 Created /tmp/${dirName}/${fileName}`);
-        }
-
-        // Also write the contract file directly in /tmp (for "from X import ...")
-        this.pyodide.FS.writeFile(`/tmp/${fileName}`, contractFile.content, { encoding: 'utf8' });
-        console.log(`📝 Created /tmp/${fileName}`);
-      }
-
-      // Load test mocks first (they define BlueprintTestCase and other test utilities)
-      const { getHathorTestMocks } = await import('../utils/hathorTestMocks');
-      this.pyodide.runPython(getHathorTestMocks());
-
-      // Now create hathor.testing.blueprint module using Python's module system
-      // This way it has access to the globally available BlueprintTestCase
-      this.pyodide.runPython(`
-import sys
-import types
-
-# Create hathor package if it doesn't exist
-if 'hathor' not in sys.modules:
-    hathor = types.ModuleType('hathor')
-    sys.modules['hathor'] = hathor
-else:
-    hathor = sys.modules['hathor']
-
-# Create hathor.testing package
-testing = types.ModuleType('hathor.testing')
-testing.__package__ = 'hathor.testing'
-sys.modules['hathor.testing'] = testing
-hathor.testing = testing
-
-# Create hathor.testing.blueprint module
-blueprint_module = types.ModuleType('hathor.testing.blueprint')
-blueprint_module.__package__ = 'hathor.testing'
-
-# Add BlueprintTestCase (which is now available from test mocks)
-blueprint_module.BlueprintTestCase = BlueprintTestCase
-
-# Add create_test_env function
-def create_test_env(*args, **kwargs):
-    """Create a test environment - returns a BlueprintTestCase instance"""
-    test_case = BlueprintTestCase()
-    test_case.setUp()
-    return test_case
-
-blueprint_module.create_test_env = create_test_env
-
-# Register the module
-sys.modules['hathor.testing.blueprint'] = blueprint_module
-testing.blueprint = blueprint_module
-
-print("✓ Created hathor.testing.blueprint module")
-`);
-
       // Write the test content to a temporary file
       this.pyodide.FS.writeFile(`/tmp/${testFileName}`, testContent, { encoding: 'utf8' });
-
-      // Clear Python's module cache to ensure fresh imports
-      // This is critical - otherwise Python uses old cached versions of the modules
-      this.pyodide.runPython(`
-import sys
-import importlib
-
-# Clear all test and contract modules from cache
-modules_to_clear = [k for k in sys.modules.keys() if (
-    k.startswith('test_') or
-    k.startswith('SimpleCounter') or
-    k.startswith('contracts.') or
-    k.startswith('blueprints.')
-)]
-
-for mod in modules_to_clear:
-    del sys.modules[mod]
-
-# Also invalidate import caches
-importlib.invalidate_caches()
-
-print(f"✓ Cleared {len(modules_to_clear)} cached modules")
-`);
 
       // Run actual pytest
       const result = this.pyodide.runPython(`

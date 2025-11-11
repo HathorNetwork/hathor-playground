@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Frontend for Hathor Nano Contracts IDE",
   "private": true,
-  "hathor-core-reference": "b2775beab",
+  "hathor-core-reference": "c52d31665a6222bf99d1e7b8466950f6bfb4a54c",
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
     "build": "npm run compress-modules && next build",
@@ -13,7 +13,8 @@
     "type-check": "tsc --noEmit",
     "compress-modules": "node scripts/compress-hathor-modules.js",
     "download-modules": "node scripts/download-hathor-modules.js $npm_package_hathor_core_reference",
-    "update-modules": "npm run download-modules && npm run compress-modules"
+    "update-modules": "npm run download-modules && npm run compress-modules",
+    "update-hathor-modules-list": "node scripts/update-modules-list.js"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.31",
@@ -62,6 +63,7 @@
     "zustand": "^4.4.0"
   },
   "devDependencies": {
+    "@octokit/rest": "^22.0.1",
     "@types/node": "^20.19.11",
     "@types/react": "^18.3.24",
     "@types/react-dom": "^18.3.7",
