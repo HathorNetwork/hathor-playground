@@ -345,6 +345,11 @@ except Exception as e:
 
 # Import the real Runner
 try:
+    # We need a MemoryNodeTrieStore for the runner, so we monkey-patch it here.
+    # We do it differently than the other mocks as MemoryNodeTrieStore depends
+    # on NodeTrieStore, which is defined on the same file as MemoryNodeTrieStore.
+    _monkeyPatchNodeTrieStore()
+
     from hathor.conf import HathorSettings
     from hathor.reactor.reactor import get_global_reactor
     from hathor.transaction.storage.transaction_storage import MockTransactionStorage
@@ -397,6 +402,7 @@ except ImportError as e:
 print("✅ Hathor SDK environment loaded successfully")
 `);
   }
+
 
   async compileContract(code: string, blueprint_name: string): Promise<{ success: boolean; blueprint_id?: string; error?: string }> {
     // XXX Not really compiling, but will leave named like this so we don't
