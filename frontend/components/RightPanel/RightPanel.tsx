@@ -5,9 +5,11 @@ import { Monitor, Sparkles } from 'lucide-react';
 import { PreviewPanel } from '../Preview/PreviewPanel';
 import { AgenticChat } from './AgenticChat';
 import { AgenticChatStreaming } from './AgenticChatStreaming';
+import { AgenticChatUnified } from './AgenticChatUnified';
 
-// Feature flag for streaming
+// Feature flags
 const USE_STREAMING = true;
+const USE_UNIFIED = true; // New: Use unified architecture (Blueprint + dApp)
 import { clsx } from 'clsx';
 
 type TabType = 'preview' | 'ai';
@@ -52,7 +54,7 @@ export const RightPanel: React.FC = () => {
           <PreviewPanel />
         </div>
         <div className={clsx('h-full', activeTab === 'ai' ? 'block' : 'hidden')}>
-          {USE_STREAMING ? <AgenticChatStreaming /> : <AgenticChat />}
+          {USE_UNIFIED ? <AgenticChatUnified /> : USE_STREAMING ? <AgenticChatStreaming /> : <AgenticChat />}
         </div>
       </div>
     </div>

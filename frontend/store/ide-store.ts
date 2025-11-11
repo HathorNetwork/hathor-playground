@@ -523,6 +523,46 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
         contractInstances: {},
       })),
 
+    // Helper method for AI tools to set compiled contract
+    setCompiledContract: (fileId: string, blueprintId: string) =>
+      set((state) => {
+        const file = state.files.find(f => f.id === fileId);
+        if (file) {
+          const contract: Contract = {
+            contract_id: blueprintId,
+            blueprint_id: blueprintId,
+            code: file.content,
+            methods: [],
+            created_at: new Date().toISOString(),
+          };
+          return {
+            compiledContracts: [...state.compiledContracts, contract],
+          };
+        }
+        return state;
+      }),
+
+    // Helper method for AI tools to set contract instance
+    setContractInstance: (fileId: string, instance: { contractId: string; blueprintId: string }) =>
+      set((state) => {
+        const file = state.files.find(f => f.id === fileId);
+        if (file) {
+          const contractInstance: ContractInstance = {
+            blueprintId: instance.blueprintId,
+            contractId: instance.contractId,
+            contractName: file.name.replace('.py', ''),
+            timestamp: new Date(),
+          };
+          return {
+            contractInstances: {
+              ...state.contractInstances,
+              [fileId]: contractInstance,
+            },
+          };
+        }
+        return state;
+      }),
+
     setIsCompiling: (value) =>
       set(() => ({
         isCompiling: value,

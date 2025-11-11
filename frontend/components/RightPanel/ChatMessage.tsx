@@ -94,7 +94,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   confidence,
 }) => {
   // Debug: log the raw content to see formatting
-  if (role === 'assistant' && content.includes('`')) {
+  if (role === 'assistant' && content && content.includes('`')) {
     console.log('Raw markdown content:', content);
   }
 
@@ -166,7 +166,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 em: ({ children }) => <em className="italic">{children}</em>,
               }}
             >
-              {content}
+              {content || ''}
             </ReactMarkdown>
           </div>
         </div>
