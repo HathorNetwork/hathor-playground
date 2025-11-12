@@ -10,8 +10,19 @@
 
 import { openai } from '@ai-sdk/openai';
 import { google } from '@ai-sdk/google';
-import { streamText, tool, convertToCoreMessages, convertToModelMessages } from 'ai';
+import * as ai from 'ai';
+import { tool, convertToCoreMessages, convertToModelMessages } from 'ai';
 import { z } from 'zod';
+import { initLogger, wrapAISDK } from 'braintrust';
+
+// Initialize Braintrust logger
+initLogger({
+  projectName: process.env.PROJECT_NAME || 'Hathor Playground',
+  apiKey: process.env.BRAINTRUST_API_KEY!,
+});
+
+// Wrap AI SDK functions for automatic tracing
+const { streamText } = wrapAISDK(ai);
 
 // Determine AI provider from environment
 const getAIModel = () => {
@@ -423,6 +434,7 @@ Now you have both a blueprint (testable in browser) and a dApp (deployed)!
 
       // NO maxSteps - client handles multi-turn via sendAutomaticallyWhen
       // The server just defines tools, client executes them via onToolCall
+      // Braintrust tracing is handled automatically via wrapAISDKModel()
     });
 
     return result.toUIMessageStreamResponse();

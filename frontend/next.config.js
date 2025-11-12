@@ -5,6 +5,7 @@ const nextConfig = {
   output: 'standalone',
   experimental: {
     appDir: true,
+    instrumentationHook: true, // Enable instrumentation.ts loading
   },
   async rewrites() {
     // Use environment variable or default to localhost for development
