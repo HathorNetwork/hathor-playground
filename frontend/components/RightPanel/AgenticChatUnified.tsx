@@ -12,7 +12,7 @@
 
 import React, { useRef, useEffect } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import { Sparkles, Send, Loader2, Trash2, Wrench, Code2, Globe } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 import { AIToolsClient } from '@/lib/ai-tools-client';
@@ -25,17 +25,33 @@ export const AgenticChatUnified: React.FC = () => {
   // Use local state for input since AI SDK's input handler isn't working
   const [localInput, setLocalInput] = React.useState('');
 
-  const chatHelpers = useChat({
+  // Create refs for functions we need in callbacks
+  const sendMessageRef = useRef<any>(null);
+  const addToolResultRef = useRef<any>(null);
+
+  const { messages, setMessages, sendMessage, addToolResult, status } = useChat({
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     transport: new DefaultChatTransport({
       api: '/api/chat-unified',
     }),
 
     // Client-side tool execution for BOTH Blueprint and dApp tools!
     async onToolCall({ toolCall }) {
+      console.log('🎯 onToolCall TRIGGERED!');
+      console.log('🎯 Full toolCall object:', toolCall);
+      console.log('🎯 toolCall.dynamic:', toolCall.dynamic);
+
+      // Check for dynamic tools (TypeScript requirement)
+      if (toolCall.dynamic) {
+        console.log('⚠️ Skipping dynamic tool');
+        return;
+      }
+
       const toolName = toolCall.toolName;
-      const args = toolCall.args || {};
+      const args = toolCall.input || toolCall.args || {};
 
       console.log('🔧 Tool call:', toolName, args);
+      console.log('🔧 Tool call ID:', toolCall.toolCallId);
       addConsoleMessage('info', `🔧 Executing: ${toolName}(${JSON.stringify(args).slice(0, 100)})`);
 
       try {
@@ -118,6 +134,8 @@ export const AgenticChatUnified: React.FC = () => {
             };
         }
 
+        console.log('Tool call result: ', result);
+
         // Log to console
         if (result.success) {
           addConsoleMessage('success', result.message);
@@ -125,34 +143,70 @@ export const AgenticChatUnified: React.FC = () => {
           addConsoleMessage('error', result.message);
         }
 
-        // Return result to LLM
-        return result.message + (result.data ? `\n\nData: ${JSON.stringify(result.data, null, 2)}` : '');
+        addToolResult({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          output: result.data,
+        });
       } catch (error: any) {
         const errorMsg = `Tool execution failed: ${error.message}`;
+        console.error('❌ Error in onToolCall:', error);
         addConsoleMessage('error', `❌ ${errorMsg}`);
-        return errorMsg;
+
+        // Send error via addToolResult
+        if (addToolResultRef.current) {
+          addToolResult({
+            state: 'output-error',
+            tool: toolName,
+            toolCallId: toolCall.toolCallId,
+            errorText: errorMsg,
+          });
+        }
       }
     },
+
+    /* async onFinish({ message, messages: finishMessages }) {
+      console.log('💬 Chat finished');
+      console.log('📊 Finish message parts:', message.parts);
+
+      // Check message.parts for tool calls (not message.toolInvocations)
+      const toolParts = message.parts?.filter((part: any) =>
+        part.type?.startsWith('tool-')
+      ) || [];
+
+      console.log('🔧 Tool parts:', toolParts);
+
+      if (toolParts.length > 0) {
+        // Check if any have output (state === 'output-available' or 'result')
+        const hasOutputs = toolParts.some(
+          (part: any) => part.state === 'output-available' || part.state === 'result' || part.output !== undefined
+        );
+        console.log('🔍 Has tool parts:', toolParts.length, 'Has outputs:', hasOutputs);
+
+        if (hasOutputs) {
+          console.log('✅ Tool executed successfully');
+          console.log('📋 Tool outputs:', toolParts.filter(p => p.output).map(p => ({
+            tool: p.type,
+            output: p.output?.slice(0, 100)
+          })));
+          addConsoleMessage('success', '🔧 Tool executed - results available in console');
+        } else {
+          console.log('⏳ Tool parts exist but no outputs yet');
+          addConsoleMessage('success', '✅ Response complete');
+        }
+      } else {
+        addConsoleMessage('success', '✅ Response complete');
+      }
+    }, */
 
     onError(error) {
       console.error('Chat error:', error);
       addConsoleMessage('error', `❌ Chat error: ${error.message}`);
     },
-
-    onFinish(message) {
-      console.log('Chat finished:', message);
-      addConsoleMessage('success', '✅ Response complete');
-    },
   });
 
-  const {
-    messages,
-    status,
-    setMessages,
-    sendMessage,
-    stop,
-    error,
-  } = chatHelpers;
+  // Store functions in refs so they can be accessed in callbacks
+  sendMessageRef.current = sendMessage;
 
   const isLoading = status === 'awaiting-message' || status === 'in-progress';
 

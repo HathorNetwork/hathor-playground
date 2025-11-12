@@ -42,9 +42,16 @@ export class AIToolsClient {
           size: f.content.length,
         }));
 
+      // Build a clear message with file paths
+      const fileList = filteredFiles.map(f => `  ${f.path} (${f.type}, ${f.size} bytes)`).join('\n');
+
+      const message = filteredFiles.length > 0
+        ? `Found ${filteredFiles.length} files in ${path}:\n${fileList}`
+        : `No files found in ${path}`;
+
       return {
         success: true,
-        message: `Found ${filteredFiles.length} files`,
+        message,
         data: filteredFiles,
       };
     } catch (error) {

@@ -10,7 +10,7 @@
 
 import { openai } from '@ai-sdk/openai';
 import { google } from '@ai-sdk/google';
-import { streamText, tool, convertToCoreMessages } from 'ai';
+import { streamText, tool, convertToCoreMessages, convertToModelMessages } from 'ai';
 import { z } from 'zod';
 
 // Determine AI provider from environment
@@ -37,44 +37,105 @@ const getAIModel = () => {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
-    console.log('🔍 Received body:', JSON.stringify(body, null, 2));
-
     const model = getAIModel();
 
     // Extract messages - DefaultChatTransport might send it differently
-    let messages = body.messages || body;
+    let rawMessages = body.messages || body;
 
-    console.log('🔍 Raw Messages:', JSON.stringify(messages, null, 2));
-
-    // Check if messages need conversion (have 'parts' or 'metadata' fields = UI messages)
-    const needsConversion = messages.some((m: any) => m.parts || m.metadata);
-
-    if (needsConversion) {
-      console.log('🔄 Converting UI messages to core messages');
-
-      // Manually convert UI messages to simple format
-      messages = messages.map((m: any) => {
-        if (m.parts) {
-          // Extract text from parts
-          const textParts = m.parts
-            .filter((p: any) => p.type === 'text')
-            .map((p: any) => p.text)
-            .join('');
-
-          return {
-            role: m.role,
-            content: textParts || '',
-          };
-        }
-        return {
-          role: m.role,
-          content: m.content || '',
-        };
-      });
+    // Ensure rawMessages is an array
+    if (!Array.isArray(rawMessages)) {
+      console.error('Invalid message format: expected array, got', typeof rawMessages);
+      throw new Error('Invalid message format: expected an array of messages');
     }
 
-    console.log('🔍 Final Messages:', JSON.stringify(messages, null, 2));
+    // Check if messages are UIMessages (have 'parts' array) and need conversion
+    const hasUIMessageFormat = rawMessages.some((m: any) => m.parts || m.metadata);
+
+    let messages;
+    if (hasUIMessageFormat) {
+      // Manual conversion with proper output wrapping
+
+      const coreMessages: any[] = [];
+
+      for (const msg of rawMessages) {
+        if (msg.parts) {
+          // Extract text parts
+          const textParts = msg.parts
+            .filter((p: any) => p.type === 'text')
+            .map((p: any) => p.text);
+
+          // Extract tool parts (type="tool-<name>")
+          const toolParts = msg.parts.filter((p: any) => p.type?.startsWith('tool-'));
+
+          if (msg.role === 'assistant' && toolParts.length > 0) {
+            // Create assistant message with text and tool-calls
+            const toolCalls = toolParts.map((part: any) => {
+              const toolName = part.type.replace('tool-', '');
+              return {
+                type: 'tool-call',
+                toolCallId: part.toolCallId,
+                toolName: toolName,
+                args: part.input || {},
+              };
+            });
+
+            const content = textParts.length > 0 ? textParts.join('') : '';
+
+            coreMessages.push({
+              role: 'assistant',
+              content: [
+                ...(content ? [{ type: 'text', text: content }] : []),
+                ...toolCalls,
+              ],
+            });
+
+            // If tool parts have output (state=output-available), create tool result messages
+            for (const part of toolParts) {
+              if (part.state === 'output-available' && part.output !== undefined) {
+                const toolName = part.type.replace('tool-', '');
+
+                // CRITICAL FIX: Wrap output in the correct { type, value } schema
+                const wrappedOutput = typeof part.output === 'string'
+                  ? { type: 'text', value: part.output }
+                  : { type: 'json', value: part.output };
+
+                coreMessages.push({
+                  role: 'tool',
+                  content: [{
+                    type: 'tool-result',
+                    toolCallId: part.toolCallId,
+                    toolName: toolName,
+                    output: wrappedOutput,
+                  }],
+                });
+              }
+            }
+          } else {
+            // Regular message with text content
+            const content = textParts.join('');
+            if (content) {
+              coreMessages.push({
+                role: msg.role,
+                content: content,
+              });
+            }
+          }
+        } else {
+          // Message without parts (already in simple format)
+          if (msg.content) {
+            coreMessages.push({
+              role: msg.role,
+              content: msg.content,
+            });
+          }
+        }
+      }
+
+      messages = coreMessages;
+    } else {
+      // Messages are already in simple/core format
+      messages = rawMessages;
+    }
 
     const result = streamText({
       model,
@@ -88,14 +149,16 @@ You help developers build BOTH:
 # Core Principles
 
 1. **Always Explore First**
-   - Use list_files() to see project structure
-   - Use read_file() to understand code before modifying
-   - Never guess - always check!
+   - IMPORTANT: Start by calling list_files("/") to see the entire project structure
+   - Or use get_project_structure() to see all files organized by type
+   - Then use read_file() to understand code before modifying
+   - Never guess - always check what files exist first!
 
 2. **Understand Project Type**
-   - Files in /blueprints/ or /contracts/ = Blueprint project
+   - Files in /contracts/ or /blueprints/ = Blueprint project (both are valid!)
+   - Files in /tests/ = Test files for blueprints
    - Files in /dapp/ = dApp project
-   - Both can exist in the same project!
+   - Multiple types can exist in the same project!
 
 3. **Use Appropriate Tools**
    - Blueprint tools: compile_blueprint, execute_method, run_tests
@@ -108,7 +171,7 @@ Blueprints are Python 3.11 smart contracts that run in your browser using Pyodid
 
 ## Key Rules
 
-1. **File Location**: All blueprints must be in /blueprints/*.py or /contracts/*.py
+1. **File Location**: Blueprints can be in /contracts/*.py OR /blueprints/*.py (both are valid!)
 2. **Structure**: Class inheriting from Blueprint
 3. **Methods**: Use @public (state-changing) or @view (read-only)
 4. **Export**: Must have \`__blueprint__ = ClassName\`
@@ -182,40 +245,52 @@ When asked to create or modify a dApp:
 
 # Example Workflows
 
-## Example 1: Create a Blueprint
+## Example 1: Review Existing Blueprint
+
+User: "Please review my simple counter blueprint"
+
+You should:
+1. list_files("/") → See all files in the project
+2. Read the blueprint file (could be /contracts/SimpleCounter.py or /blueprints/Counter.py)
+3. Analyze and provide feedback
+
+## Example 2: Create a Blueprint
 
 User: "Create a Counter blueprint"
 
 You should:
-1. write_file('/blueprints/Counter.py', <code>)
-2. validate_blueprint('/blueprints/Counter.py')
-3. compile_blueprint('/blueprints/Counter.py')
-4. execute_method('/blueprints/Counter.py', 'initialize', [0])
-5. execute_method('/blueprints/Counter.py', 'increment', [])
-6. execute_method('/blueprints/Counter.py', 'get_count', [])
+1. list_files("/") → Check existing structure first
+2. write_file('/contracts/Counter.py', <code>) → Use /contracts/ or /blueprints/
+3. validate_blueprint('/contracts/Counter.py')
+4. compile_blueprint('/contracts/Counter.py')
+5. execute_method('/contracts/Counter.py', 'initialize', [0])
+6. execute_method('/contracts/Counter.py', 'increment', [])
+7. execute_method('/contracts/Counter.py', 'get_count', [])
 
-## Example 2: Create a dApp
+## Example 3: Create a dApp
 
 User: "Create a simple todo dApp"
 
 You should:
-1. bootstrap_nextjs(true, true) → Creates Next.js with TypeScript & Tailwind
-2. write_file('/dapp/app/page.tsx', <todo UI code>)
-3. write_file('/dapp/components/TodoList.tsx', <component code>)
-4. deploy_dapp() → Deploys to BEAM, returns URL
-5. Tell user: "Your dApp is live at <URL>"
+1. list_files("/") → Check existing structure
+2. bootstrap_nextjs(true, true) → Creates Next.js with TypeScript & Tailwind
+3. write_file('/dapp/app/page.tsx', <todo UI code>)
+4. write_file('/dapp/components/TodoList.tsx', <component code>)
+5. deploy_dapp() → Deploys to BEAM, returns URL
+6. Tell user: "Your dApp is live at <URL>"
 
-## Example 3: Full-Stack Project
+## Example 4: Full-Stack Project
 
 User: "Build a voting dApp with a blueprint backend"
 
 You should:
-1. write_file('/blueprints/Voting.py', <voting contract>)
-2. compile_blueprint('/blueprints/Voting.py')
-3. run_tests('/tests/test_voting.py')
-4. bootstrap_nextjs(true, true)
-5. write_file('/dapp/app/page.tsx', <voting UI>)
-6. deploy_dapp()
+1. list_files("/") → Check what exists
+2. write_file('/contracts/Voting.py', <voting contract>)
+3. compile_blueprint('/contracts/Voting.py')
+4. run_tests('/tests/test_voting.py')
+5. bootstrap_nextjs(true, true)
+6. write_file('/dapp/app/page.tsx', <voting UI>)
+7. deploy_dapp()
 
 Now you have both a blueprint (testable in browser) and a dApp (deployed)!
 
@@ -230,9 +305,9 @@ Now you have both a blueprint (testable in browser) and a dApp (deployed)!
         // ========== Shared Tools ==========
 
         list_files: tool({
-          description: 'List files and directories in the project. Use "/" to list root directory.',
+          description: 'List files and directories in the project. IMPORTANT: Start with "/" to see the entire project structure, then explore subdirectories as needed.',
           parameters: z.object({
-            path: z.string().describe('Directory path to list. Use "/" for root directory.'),
+            path: z.string().describe('Directory path to list. Use "/" to see all files, or "/contracts/" or "/dapp/" for specific sections. Start with "/" when unsure what files exist.'),
           }),
         }),
 
@@ -337,7 +412,8 @@ Now you have both a blueprint (testable in browser) and a dApp (deployed)!
         }),
       },
 
-      maxSteps: 15, // Allow longer tool chains for complex workflows
+      // NO maxSteps - client handles multi-turn via sendAutomaticallyWhen
+      // The server just defines tools, client executes them via onToolCall
     });
 
     return result.toUIMessageStreamResponse();
