@@ -132,21 +132,88 @@ export const ToolOutput = ({
     return null;
   }
 
-  let Output = <div>{output as ReactNode}</div>;
+  // Helper to render pre-formatted text (respects newlines, enables horizontal scroll)
+  const renderPreformattedText = (text: string) => (
+    <pre className="whitespace-pre font-mono text-xs p-3 overflow-x-auto">
+      {text}
+    </pre>
+  );
+
+  let Output: ReactNode = <div>{output as ReactNode}</div>;
+  let showJsonStructure = false;
 
   if (typeof output === "object" && !isValidElement(output)) {
-    Output = (
-      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
-    );
+    const outputObj = output as any;
+
+    // Strategy 1: Extract 'output' field if present (common pattern)
+    if (outputObj.output && typeof outputObj.output === "string") {
+      Output = renderPreformattedText(outputObj.output);
+
+      // Show JSON structure indicator if there are other fields
+      const otherFields = Object.keys(outputObj).filter(k => k !== 'output');
+      showJsonStructure = otherFields.length > 0;
+    }
+    // Strategy 2: Handle success/error structure
+    else if ('success' in outputObj) {
+      if (outputObj.success === false && outputObj.message) {
+        // Error case
+        Output = (
+          <div className="p-3 space-y-2">
+            <div className="text-red-400 font-medium">❌ {outputObj.message}</div>
+            {outputObj.error && (
+              <pre className="text-red-300/80 text-xs whitespace-pre mt-2 overflow-x-auto">
+                {typeof outputObj.error === 'string' ? outputObj.error : JSON.stringify(outputObj.error, null, 2)}
+              </pre>
+            )}
+          </div>
+        );
+      } else if (outputObj.data) {
+        // Success with data
+        Output = (
+          <div className="p-3 space-y-2">
+            {outputObj.message && (
+              <div className="text-green-400 font-medium mb-2">✅ {outputObj.message}</div>
+            )}
+            {typeof outputObj.data === 'string' ? (
+              renderPreformattedText(outputObj.data)
+            ) : (
+              <CodeBlock code={JSON.stringify(outputObj.data, null, 2)} language="json" />
+            )}
+          </div>
+        );
+      } else if (outputObj.message) {
+        // Success with just a message
+        Output = (
+          <div className="p-3">
+            <div className="text-green-400 font-medium">✅ {outputObj.message}</div>
+          </div>
+        );
+      } else {
+        // Fallback to JSON
+        Output = <CodeBlock code={JSON.stringify(outputObj, null, 2)} language="json" />;
+      }
+    }
+    // Strategy 3: Plain object - show as JSON
+    else {
+      Output = <CodeBlock code={JSON.stringify(outputObj, null, 2)} language="json" />;
+    }
   } else if (typeof output === "string") {
-    Output = <CodeBlock code={output} language="json" />;
+    // Plain string output - render as preformatted text
+    Output = renderPreformattedText(output);
   }
 
   return (
     <div className={cn("space-y-2 p-4 border-t border-gray-700/50", className)} {...props}>
-      <h4 className="font-medium text-gray-400 text-xs uppercase tracking-wide">
-        {errorText ? "Error" : "Result"}
-      </h4>
+      <div className="flex items-center justify-between">
+        <h4 className="font-medium text-gray-400 text-xs uppercase tracking-wide">
+          {errorText ? "Error" : "Result"}
+        </h4>
+        {showJsonStructure && (
+          <span className="text-gray-500 text-xs">
+            + metadata
+          </span>
+        )}
+      </div>
       <div
         className={cn(
           "overflow-x-auto rounded-md text-xs [&_table]:w-full border",
