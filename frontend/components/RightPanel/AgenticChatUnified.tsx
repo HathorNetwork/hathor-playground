@@ -10,13 +10,154 @@
  * All tools execute client-side for maximum performance.
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
-import { Sparkles, Send, Loader2, Trash2, Wrench, Code2, Globe } from 'lucide-react';
+import { Sparkles, Send, Loader2, Trash2, Wrench, Code2, Globe, ChevronDown, ChevronRight } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 import { AIToolsClient } from '@/lib/ai-tools-client';
 import { ChatMessage } from './ChatMessage';
+
+// Component for displaying tool invocations
+const ToolInvocationsDisplay: React.FC<{ toolInvocations: any[] }> = ({ toolInvocations }) => {
+  const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
+
+  const toggleTool = (index: number) => {
+    const newExpanded = new Set(expandedTools);
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index);
+    } else {
+      newExpanded.add(index);
+    }
+    setExpandedTools(newExpanded);
+  };
+
+  const truncateString = (str: string, maxLength: number = 100) => {
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength) + '...';
+  };
+
+  const getToolSummary = (tool: any) => {
+    // Create a compact summary of the tool arguments
+    if (!tool.args || Object.keys(tool.args).length === 0) return '';
+
+    const args = tool.args;
+    const entries = Object.entries(args);
+
+    if (entries.length === 1) {
+      const [key, value] = entries[0];
+      return `${key}: ${truncateString(String(value), 40)}`;
+    }
+
+    return `${entries.length} args`;
+  };
+
+  return (
+    <div className="ml-12 mt-2 space-y-1">
+      {toolInvocations.map((tool: any, toolIndex: number) => {
+        const isExpanded = expandedTools.has(toolIndex);
+
+        // Determine tool category for styling
+        const isBlueprintTool = [
+          'validate_blueprint',
+          'compile_blueprint',
+          'execute_method',
+          'run_tests',
+          'list_methods',
+        ].includes(tool.toolName);
+
+        const isDAppTool = [
+          'bootstrap_nextjs',
+          'deploy_dapp',
+          'upload_files',
+          'get_sandbox_url',
+          'restart_dev_server',
+        ].includes(tool.toolName);
+
+        const bgColor = isBlueprintTool
+          ? 'bg-blue-500/5 hover:bg-blue-500/10'
+          : isDAppTool
+          ? 'bg-green-500/5 hover:bg-green-500/10'
+          : 'bg-gray-800/50 hover:bg-gray-800';
+
+        const borderColor = isBlueprintTool
+          ? 'border-blue-500/20'
+          : isDAppTool
+          ? 'border-green-500/20'
+          : 'border-gray-700/50';
+
+        const iconColor = isBlueprintTool
+          ? 'text-blue-400'
+          : isDAppTool
+          ? 'text-green-400'
+          : 'text-gray-400';
+
+        const summary = getToolSummary(tool);
+
+        return (
+          <div
+            key={toolIndex}
+            className={`border rounded-lg overflow-hidden ${borderColor} ${bgColor} transition-colors`}
+          >
+            {/* Header - Always visible */}
+            <button
+              onClick={() => toggleTool(toolIndex)}
+              className="w-full px-3 py-2 flex items-center gap-2 text-left"
+            >
+              {isExpanded ? (
+                <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0" />
+              ) : (
+                <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
+              )}
+              <Wrench className={`w-3 h-3 ${iconColor} flex-shrink-0`} />
+              <span className={`font-mono text-xs ${iconColor} flex-shrink-0`}>
+                {tool.toolName}
+              </span>
+              {summary && (
+                <span className="text-xs text-gray-500 truncate flex-1 min-w-0">
+                  {summary}
+                </span>
+              )}
+              {tool.state === 'result' && (
+                <span className="text-green-400 text-xs flex-shrink-0">✓</span>
+              )}
+              {tool.state === 'call' && (
+                <Loader2 className="w-3 h-3 animate-spin text-yellow-400 flex-shrink-0" />
+              )}
+            </button>
+
+            {/* Expanded content */}
+            {isExpanded && (
+              <div className="border-t border-gray-700/50">
+                {/* Args */}
+                {tool.args && Object.keys(tool.args).length > 0 && (
+                  <div className="px-3 py-2 bg-black/20">
+                    <div className="text-xs text-gray-500 mb-1">Arguments:</div>
+                    <pre className="text-xs text-gray-300 font-mono overflow-x-auto">
+                      {JSON.stringify(tool.args, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Result */}
+                {tool.state === 'result' && tool.result && (
+                  <div className="px-3 py-2 border-t border-gray-700/50 bg-black/20">
+                    <div className="text-xs text-gray-500 mb-1">Result:</div>
+                    <pre className="text-xs text-gray-300 font-mono overflow-x-auto max-h-60 overflow-y-auto">
+                      {typeof tool.result === 'string'
+                        ? tool.result
+                        : JSON.stringify(tool.result, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 export const AgenticChatUnified: React.FC = () => {
   const { activeProjectId, addConsoleMessage } = useIDEStore();
@@ -25,12 +166,31 @@ export const AgenticChatUnified: React.FC = () => {
   // Use local state for input since AI SDK's input handler isn't working
   const [localInput, setLocalInput] = React.useState('');
 
+  // Track tool calling rounds to prevent infinite loops
+  const toolRoundCounterRef = useRef(0);
+  const MAX_TOOL_ROUNDS = 10; // Limit to prevent infinite loops
+
   // Create refs for functions we need in callbacks
   const sendMessageRef = useRef<any>(null);
   const addToolResultRef = useRef<any>(null);
 
   const { messages, setMessages, sendMessage, addToolResult, status } = useChat({
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    sendAutomaticallyWhen: (opts) => {
+      // Check if we've exceeded max rounds
+      if (toolRoundCounterRef.current >= MAX_TOOL_ROUNDS) {
+        console.warn(`⚠️ Max tool rounds (${MAX_TOOL_ROUNDS}) reached, stopping automatic sends`);
+        addConsoleMessage('warning', `⚠️ Max tool calling rounds reached (${MAX_TOOL_ROUNDS}). Stopping to prevent infinite loop.`);
+        return false;
+      }
+
+      // Use default behavior: send when last assistant message has complete tool calls
+      const shouldSend = lastAssistantMessageIsCompleteWithToolCalls(opts);
+      if (shouldSend) {
+        toolRoundCounterRef.current++;
+        console.log(`🔄 Tool round ${toolRoundCounterRef.current}/${MAX_TOOL_ROUNDS}`);
+      }
+      return shouldSend;
+    },
     transport: new DefaultChatTransport({
       api: '/api/chat-unified',
     }),
@@ -99,7 +259,26 @@ export const AgenticChatUnified: React.FC = () => {
             break;
 
           case 'run_tests':
-            result = await AIToolsClient.runTests(args.test_path);
+            // Validate test_path parameter
+            if (!args.test_path) {
+              // Try to find available test files to help the AI
+              const files = (await AIToolsClient.listFiles('/tests')).data || [];
+              const testFiles = files.filter((f: any) =>
+                f.name.startsWith('test_') && f.name.endsWith('.py')
+              );
+
+              const suggestion = testFiles.length > 0
+                ? `\n\nAvailable test files:\n${testFiles.map((f: any) => `  - ${f.path}`).join('\n')}`
+                : '\n\nNo test files found in /tests/';
+
+              result = {
+                success: false,
+                message: `Missing required parameter: test_path${suggestion}`,
+                error: 'test_path parameter is required. Example: run_tests({ test_path: "/tests/test_counter.py" })',
+              };
+            } else {
+              result = await AIToolsClient.runTests(args.test_path);
+            }
             break;
 
           // ========== dApp Tools ==========
@@ -260,6 +439,9 @@ export const AgenticChatUnified: React.FC = () => {
     const userMessage = localInput;
     setLocalInput(''); // Clear input immediately
 
+    // Reset tool round counter for new user message
+    toolRoundCounterRef.current = 0;
+
     // Use sendMessage from useChat (new API with onToolCall)
     try {
       await sendMessage({
@@ -356,77 +538,12 @@ export const AgenticChatUnified: React.FC = () => {
               <ChatMessage
                 role={message.role}
                 content={content}
-                toolInvocations={message.toolInvocations}
               />
 
-            {/* Tool invocations */}
-            {message.toolInvocations && message.toolInvocations.length > 0 && (
-              <div className="ml-12 mt-2 space-y-2">
-                {message.toolInvocations.map((tool: any, toolIndex: number) => {
-                  // Determine tool category for styling
-                  const isBlueprintTool = [
-                    'validate_blueprint',
-                    'compile_blueprint',
-                    'execute_method',
-                    'run_tests',
-                    'list_methods',
-                  ].includes(tool.toolName);
-
-                  const isDAppTool = [
-                    'bootstrap_nextjs',
-                    'deploy_dapp',
-                    'upload_files',
-                    'get_sandbox_url',
-                    'restart_dev_server',
-                  ].includes(tool.toolName);
-
-                  const borderColor = isBlueprintTool
-                    ? 'border-blue-500/30'
-                    : isDAppTool
-                    ? 'border-green-500/30'
-                    : 'border-gray-700';
-
-                  const iconColor = isBlueprintTool
-                    ? 'text-blue-400'
-                    : isDAppTool
-                    ? 'text-green-400'
-                    : 'text-gray-400';
-
-                  return (
-                    <div
-                      key={toolIndex}
-                      className={`p-3 bg-gray-800 border rounded-lg text-xs ${borderColor}`}
-                    >
-                      <div className="flex items-center gap-2 mb-2">
-                        <Wrench className={`w-3 h-3 ${iconColor}`} />
-                        <span className={`font-mono ${iconColor}`}>{tool.toolName}</span>
-                        {tool.state === 'result' && <span className="text-green-400">✓</span>}
-                        {tool.state === 'call' && (
-                          <Loader2 className="w-3 h-3 animate-spin text-yellow-400" />
-                        )}
-                      </div>
-
-                      {/* Args */}
-                      {tool.args && Object.keys(tool.args).length > 0 && (
-                        <div className="text-gray-400 mb-2">
-                          <span className="font-semibold">Args:</span>{' '}
-                          {JSON.stringify(tool.args, null, 2)}
-                        </div>
-                      )}
-
-                      {/* Result */}
-                      {tool.state === 'result' && tool.result && (
-                        <div className="text-gray-300 whitespace-pre-wrap">
-                          {typeof tool.result === 'string'
-                            ? tool.result
-                            : JSON.stringify(tool.result, null, 2)}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+              {/* Tool invocations */}
+              {message.toolInvocations && message.toolInvocations.length > 0 && (
+                <ToolInvocationsDisplay toolInvocations={message.toolInvocations} />
+              )}
             </div>
           );
         })}
