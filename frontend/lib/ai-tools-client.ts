@@ -404,10 +404,18 @@ export class AIToolsClient {
       // Initialize Pyodide if needed
       await pyodideRunner.initialize();
 
-      // Run the tests
+      // Get all contract files (files in /contracts/ or /blueprints/)
+      const contractFiles = files.filter(f =>
+        (f.path.startsWith('/contracts/') || f.path.startsWith('/blueprints/')) &&
+        f.type === 'contract'
+      );
+
+      // Run the tests, passing both the test file and contract files
+      // The runner will create the proper filesystem structure
       const result = await pyodideRunner.runTests(
         testFile.content,
-        testFile.name
+        testFile.name,
+        contractFiles
       );
 
       if (result.success) {

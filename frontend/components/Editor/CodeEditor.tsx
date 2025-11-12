@@ -4,9 +4,16 @@ import React, { useRef, useEffect } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
 import { useIDEStore, File } from '@/store/ide-store';
 
-export const CodeEditor: React.FC = () => {
-  const editorRef = useRef<any>(null);
+interface CodeEditorProps {
+  editorRef?: React.MutableRefObject<any>;
+}
+
+export const CodeEditor: React.FC<CodeEditorProps> = ({ editorRef: externalEditorRef }) => {
+  const internalEditorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
+
+  // Use external ref if provided, otherwise use internal ref
+  const editorRef = externalEditorRef || internalEditorRef;
 
   const { files, activeFileId, updateFile } = useIDEStore();
   const activeFile = files.find((f: File) => f.id === activeFileId);

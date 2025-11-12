@@ -707,7 +707,11 @@ json.dumps(validation_result)
     return this.isInitialized;
   }
 
-  async runTests(testContent: string, testFileName: string = 'test_file.py'): Promise<ExecutionResult> {
+  async runTests(
+    testContent: string,
+    testFileName: string = 'test_file.py',
+    contractFiles: Array<{ path: string; content: string; name: string }> = []
+  ): Promise<ExecutionResult> {
     if (!this.pyodide) {
       await this.initialize();
     }
@@ -715,8 +719,103 @@ json.dumps(validation_result)
     try {
       console.log('🧪 Running pytest on test file...');
 
+      // Create contract files in the filesystem so imports work naturally
+      for (const contractFile of contractFiles) {
+        const fileName = contractFile.name;
+
+        // Extract directory path (e.g., "/contracts/" or "/blueprints/")
+        const dirMatch = contractFile.path.match(/^\/(contracts|blueprints)\//);
+        if (dirMatch) {
+          const dirName = dirMatch[1]; // "contracts" or "blueprints"
+
+          // Create the directory if it doesn't exist
+          try {
+            this.pyodide.FS.mkdir(`/tmp/${dirName}`);
+          } catch (e) {
+            // Directory might already exist, ignore error
+          }
+
+          // Write the contract file in the subdirectory (for "from contracts.X import ...")
+          this.pyodide.FS.writeFile(`/tmp/${dirName}/${fileName}`, contractFile.content, { encoding: 'utf8' });
+          console.log(`📝 Created /tmp/${dirName}/${fileName}`);
+        }
+
+        // Also write the contract file directly in /tmp (for "from X import ...")
+        this.pyodide.FS.writeFile(`/tmp/${fileName}`, contractFile.content, { encoding: 'utf8' });
+        console.log(`📝 Created /tmp/${fileName}`);
+      }
+
+      // Load test mocks first (they define BlueprintTestCase and other test utilities)
+      const { getHathorTestMocks } = await import('../utils/hathorTestMocks');
+      this.pyodide.runPython(getHathorTestMocks());
+
+      // Now create hathor.testing.blueprint module using Python's module system
+      // This way it has access to the globally available BlueprintTestCase
+      this.pyodide.runPython(`
+import sys
+import types
+
+# Create hathor package if it doesn't exist
+if 'hathor' not in sys.modules:
+    hathor = types.ModuleType('hathor')
+    sys.modules['hathor'] = hathor
+else:
+    hathor = sys.modules['hathor']
+
+# Create hathor.testing package
+testing = types.ModuleType('hathor.testing')
+testing.__package__ = 'hathor.testing'
+sys.modules['hathor.testing'] = testing
+hathor.testing = testing
+
+# Create hathor.testing.blueprint module
+blueprint_module = types.ModuleType('hathor.testing.blueprint')
+blueprint_module.__package__ = 'hathor.testing'
+
+# Add BlueprintTestCase (which is now available from test mocks)
+blueprint_module.BlueprintTestCase = BlueprintTestCase
+
+# Add create_test_env function
+def create_test_env(*args, **kwargs):
+    """Create a test environment - returns a BlueprintTestCase instance"""
+    test_case = BlueprintTestCase()
+    test_case.setUp()
+    return test_case
+
+blueprint_module.create_test_env = create_test_env
+
+# Register the module
+sys.modules['hathor.testing.blueprint'] = blueprint_module
+testing.blueprint = blueprint_module
+
+print("✓ Created hathor.testing.blueprint module")
+`);
+
       // Write the test content to a temporary file
       this.pyodide.FS.writeFile(`/tmp/${testFileName}`, testContent, { encoding: 'utf8' });
+
+      // Clear Python's module cache to ensure fresh imports
+      // This is critical - otherwise Python uses old cached versions of the modules
+      this.pyodide.runPython(`
+import sys
+import importlib
+
+# Clear all test and contract modules from cache
+modules_to_clear = [k for k in sys.modules.keys() if (
+    k.startswith('test_') or
+    k.startswith('SimpleCounter') or
+    k.startswith('contracts.') or
+    k.startswith('blueprints.')
+)]
+
+for mod in modules_to_clear:
+    del sys.modules[mod]
+
+# Also invalidate import caches
+importlib.invalidate_caches()
+
+print(f"✓ Cleared {len(modules_to_clear)} cached modules")
+`);
 
       // Run actual pytest
       const result = this.pyodide.runPython(`

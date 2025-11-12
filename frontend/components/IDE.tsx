@@ -18,7 +18,7 @@ import dynamic from 'next/dynamic';
 const EditorTabs = dynamic(() => import('./Editor/EditorTabs').then(mod => mod.EditorTabs), { ssr: false });
 
 export function IDE() {
-  
+
   const [isAICollapsed, setIsAICollapsed] = React.useState(true);
   const [isPyodideReady, setIsPyodideReady] = React.useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = React.useState(false);
@@ -26,6 +26,7 @@ export function IDE() {
   const aiPanelRef = React.useRef<ImperativePanelHandle>(null);
   const codePanelRef = React.useRef<ImperativePanelHandle>(null);
   const leftSidebarPanelRef = React.useRef<ImperativePanelHandle>(null);
+  const editorRef = React.useRef<any>(null); // Store editor instance for direct content access
   
   const {
     files,
@@ -118,23 +119,39 @@ export function IDE() {
     addConsoleMessage('info', `Running tests from ${activeFile.name}...`);
 
     try {
-      const { validateTestBlueprints, combineCodeForTesting } = await import('../utils/testParser');
+      const { validateTestBlueprints } = await import('../utils/testParser');
       const { pyodideRunner } = await import('../lib/pyodide-runner');
-      
-      const contractFiles = files.filter(f => f.type !== 'test');
-      
-      const validation = validateTestBlueprints(activeFile, contractFiles);
-      
+
+      // Get the CURRENT content from the Monaco editor (not from store which might be stale)
+      const currentTestContent = editorRef.current?.getValue() || activeFile.content;
+
+      // Also get current content for contract files
+      const contractFiles = files.filter(f => f.type !== 'test').map(f => {
+        // If this file is currently open in the editor, get its current content
+        if (f.id === activeFileId && editorRef.current) {
+          return { ...f, content: editorRef.current.getValue() };
+        }
+        return f;
+      });
+
+      // Create a test file object with current content for validation
+      const currentTestFile = { ...activeFile, content: currentTestContent };
+
+      const validation = validateTestBlueprints(currentTestFile, contractFiles);
+
       if (!validation.isValid) {
         validation.errors.forEach(error => {
           addConsoleMessage('error', `❌ ${error}`);
         });
         return;
       }
-      
-      const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
-      
-      const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
+
+      // Pass contract files to runner so it can create them in the filesystem
+      const testResult = await pyodideRunner.runTests(
+        currentTestContent,
+        activeFile.name,
+        contractFiles
+      );
       
       // Save test execution logs to store
       if (testResult.output) {
@@ -231,7 +248,7 @@ export function IDE() {
             <PanelGroup direction="vertical">
               <Panel defaultSize={70}>
                 <EditorTabs />
-                <CodeEditor />
+                <CodeEditor editorRef={editorRef} />
               </Panel>
               <PanelResizeHandle className="h-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
               <Panel defaultSize={30} minSize={15}>
