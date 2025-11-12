@@ -84,7 +84,7 @@ interface IDEState {
   getActiveProject: () => Project | null;
 
   // File actions
-  addFile: (file: File) => void;
+  addFile: (file: Omit<File, 'id'>) => void;
   updateFile: (id: string, content: string) => void;
   deleteFile: (id: string) => void;
   setActiveFile: (id: string) => void;
@@ -316,10 +316,16 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
 
       if (!activeProject) return;
 
+      // Generate unique ID for the new file
+      const fileWithId: File = {
+        ...file,
+        id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      };
+
       // Update project's files
       const updatedProjects = state.projects.map((p) =>
         p.id === activeProject.id
-          ? { ...p, files: [...p.files, file], lastModified: Date.now() }
+          ? { ...p, files: [...p.files, fileWithId], lastModified: Date.now() }
           : p
       );
 
@@ -328,18 +334,18 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
 
       set({
         projects: updatedProjects,
-        files: [...state.files, file],
-        openFileIds: [...state.openFileIds, file.id],
-        activeFileId: file.id,
+        files: [...state.files, fileWithId],
+        openFileIds: [...state.openFileIds, fileWithId.id],
+        activeFileId: fileWithId.id,
       });
 
       // Auto-persist to storage
       if (state.isStorageInitialized) {
-        state.saveFileToStorage(file).catch(console.error);
+        state.saveFileToStorage(fileWithId).catch(console.error);
       }
 
       // Sync dApp files to Beam
-      syncDAppFilesToBeam(activeProject.id, file).catch(console.error);
+      syncDAppFilesToBeam(activeProject.id, fileWithId).catch(console.error);
     },
 
     updateFile: (id, content) => {
@@ -534,6 +540,7 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
             code: file.content,
             methods: [],
             created_at: new Date().toISOString(),
+            fileId: fileId, // Store which file this was compiled from
           };
           return {
             compiledContracts: [...state.compiledContracts, contract],
@@ -678,18 +685,24 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
           const storedProjects: Project[] = JSON.parse(storedProjectsJson);
 
           if (storedProjects.length > 0) {
-            const activeProjectId = localStorage.getItem('hathor-active-project-id') || storedProjects[0].id;
-            const activeProject = storedProjects.find(p => p.id === activeProjectId) || storedProjects[0];
+            // Filter out __init__.py files from all projects (they can resurrect from storage)
+            const cleanedProjects = storedProjects.map(project => ({
+              ...project,
+              files: project.files.filter(f => f.name !== '__init__.py'),
+            }));
+
+            const activeProjectId = localStorage.getItem('hathor-active-project-id') || cleanedProjects[0].id;
+            const activeProject = cleanedProjects.find(p => p.id === activeProjectId) || cleanedProjects[0];
 
             set({
-              projects: storedProjects,
+              projects: cleanedProjects,
               activeProjectId: activeProject.id,
               files: activeProject.files,
               openFileIds: activeProject.files[0] ? [activeProject.files[0].id] : [],
               activeFileId: activeProject.files[0]?.id || null,
             });
 
-            console.log(`Loaded ${storedProjects.length} projects from localStorage`);
+            console.log(`Loaded ${cleanedProjects.length} projects from localStorage`);
             return;
           }
         }

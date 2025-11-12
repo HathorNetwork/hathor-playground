@@ -45,7 +45,7 @@ def _convert_frontend_args(args_json, kwargs_json):
     kwargs = json.loads(kwargs_json) if kwargs_json else {}
 
     parsed_args = [parse_arg(arg) for arg in args]
-    parsed_kwargs = {k: parse_args(v) for k, v in kwargs.items()}
+    parsed_kwargs = {k: parse_arg(v) for k, v in kwargs.items()}
     print(f"Converted args from frontend: {parsed_args}")
     print(f"Converted kwargs from frontend: {parsed_kwargs}")
 

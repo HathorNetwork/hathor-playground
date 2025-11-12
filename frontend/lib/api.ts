@@ -73,6 +73,7 @@ export interface Contract {
   code: string;
   methods: string[];
   created_at: string;
+  fileId?: string; // Track which file this contract was compiled from
 }
 
 export interface StorageInfo {

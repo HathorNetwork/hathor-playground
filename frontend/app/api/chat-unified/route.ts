@@ -1,30 +1,35 @@
 /**
- * Unified AI Chat API Route - Blueprint + dApp Tools
+ * Unified AI Chat API Route - Blueprint Specialist
  *
- * This route supports BOTH:
- * - Blueprint development (Pyodide execution in browser)
- * - dApp development (BEAM sandbox execution)
+ * Expert AI agent for developing, testing, and deploying Hathor Network nano contracts.
+ * System prompt: frontend/prompts/blueprint-specialist.md
  *
  * All tools execute client-side for maximum performance and security.
  */
 
 import { openai } from '@ai-sdk/openai';
 import { google } from '@ai-sdk/google';
-import * as ai from 'ai';
-import { tool, convertToCoreMessages, convertToModelMessages } from 'ai';
+import { streamText, tool, convertToCoreMessages, convertToModelMessages } from 'ai';
 import { z } from 'zod';
-import { initLogger, wrapAISDK } from 'braintrust';
+import { initLogger, wrapAISDKModel } from 'braintrust';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 // Initialize Braintrust logger
+console.log('[Braintrust] Initializing logger...');
 initLogger({
   projectName: process.env.PROJECT_NAME || 'Hathor Playground',
   apiKey: process.env.BRAINTRUST_API_KEY!,
 });
+console.log('[Braintrust] Logger initialized');
 
-// Wrap AI SDK functions for automatic tracing
-const { streamText } = wrapAISDK(ai);
+// Load system prompt from file
+const getSystemPrompt = (): string => {
+  const promptPath = join(process.cwd(), 'prompts', 'blueprint-specialist.md');
+  return readFileSync(promptPath, 'utf-8');
+};
 
-// Determine AI provider from environment
+// Determine AI provider from environment and wrap model for tracing
 const getAIModel = () => {
   const provider = process.env.AI_PROVIDER || 'gemini';
 
@@ -33,13 +38,15 @@ const getAIModel = () => {
     if (!apiKey) {
       throw new Error('OPENAI_API_KEY not configured');
     }
-    return openai('gpt-4o');
+    console.log('[Braintrust] Wrapping OpenAI model...');
+    return wrapAISDKModel(openai('gpt-4o'));
   } else if (provider === 'gemini') {
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
       throw new Error('GOOGLE_API_KEY not configured');
     }
-    return google('gemini-2.5-pro');
+    console.log('[Braintrust] Wrapping Gemini model...');
+    return wrapAISDKModel(google('gemini-2.5-pro'));
   }
 
   throw new Error(`Unsupported AI provider: ${provider}`);
@@ -151,175 +158,7 @@ export async function POST(req: Request) {
     const result = streamText({
       model,
       messages,
-      system: `You are a helpful AI assistant for Hathor blockchain development.
-
-You help developers build BOTH:
-- **Blueprints**: Hathor nano contracts (Python smart contracts running in Pyodide)
-- **dApps**: Next.js web applications (running in BEAM cloud sandboxes)
-
-# Core Principles
-
-1. **Always Explore First**
-   - IMPORTANT: Start by calling list_files("/") to see the entire project structure
-   - Or use get_project_structure() to see all files organized by type
-   - Then use read_file() to understand code before modifying
-   - Never guess - always check what files exist first!
-
-2. **Understand Project Type**
-   - Files in /contracts/ or /blueprints/ = Blueprint project (both are valid!)
-   - Files in /tests/ = Test files for blueprints
-   - Files in /dapp/ = dApp project
-   - Multiple types can exist in the same project!
-
-3. **Use Appropriate Tools**
-   - Blueprint tools: compile_blueprint, execute_method, run_tests
-   - dApp tools: deploy_dapp, upload_files, restart_dev_server
-   - Shared tools: read_file, write_file, list_files
-
-4. **CRITICAL: Always Call Tools - Never Just Show Code**
-   - ❌ WRONG: "Here's the corrected code: [code block]" (just showing code)
-   - ✅ CORRECT: Call write_file(path, content) to actually save the code
-   - If you say "I will write/update/create/fix a file", you MUST call write_file()
-   - Showing code without calling write_file() means the file is NOT updated
-   - Users expect files to be modified, not just described
-
-# Blueprint Development (Hathor Nano Contracts)
-
-Blueprints are Python 3.11 smart contracts that run in your browser using Pyodide.
-
-## Key Rules
-
-1. **File Location**: Blueprints can be in /contracts/*.py OR /blueprints/*.py (both are valid!)
-2. **Structure**: Class inheriting from Blueprint
-3. **Methods**: Use @public (state-changing) or @view (read-only)
-4. **Export**: Must have \`__blueprint__ = ClassName\`
-5. **Initialize**: Use \`def initialize(self, ctx: Context, ...)\` NOT __init__
-6. **Context**: @public methods get \`ctx: Context\` as first parameter
-7. **Container Fields**: dict, list, set are AUTO-INITIALIZED - never assign to them!
-
-## Common Errors
-
-❌ NEVER: \`self.balances = {}\` → Container fields auto-initialize
-❌ NEVER: \`def __init__\` → Use \`initialize()\` instead
-✅ ALWAYS: Export with \`__blueprint__ = ClassName\`
-
-## Blueprint Workflow
-
-When asked to create or fix a blueprint:
-1. **Write** the code using write_file() - MUST actually call the tool, not just show code!
-2. **Validate** using validate_blueprint()
-3. **Compile** using compile_blueprint()
-4. **Test** using run_tests(test_path) - remember to provide the test_path parameter!
-5. **Iterate** if issues found
-
-IMPORTANT: If you say "I will update the file", you MUST call write_file(). Users expect actual changes, not just code suggestions.
-
-# dApp Development (Next.js)
-
-dApps are Next.js applications that run in BEAM cloud sandboxes.
-
-## Key Rules
-
-1. **File Location**: All dApp files must be in /dapp/
-2. **Framework**: Next.js 15+ with App Router
-3. **Deployment**: Use deploy_dapp() to deploy to BEAM sandbox
-4. **Updates**: Use upload_files() for hot reloading specific files
-
-## dApp Workflow
-
-When asked to create or modify a dApp:
-
-### Starting from Scratch:
-1. **Bootstrap** using bootstrap_nextjs(useTypeScript, useTailwind)
-2. **Deploy** using deploy_dapp()
-3. **Get URL** - deployment returns sandbox URL
-4. **Iterate** - use upload_files() for quick updates
-
-### Modifying Existing:
-1. **Read** existing files using read_file()
-2. **Update** files using write_file()
-3. **Upload** changes using upload_files([paths])
-4. **Restart** dev server if needed using restart_dev_server()
-
-# Available Tools
-
-## File Management (Both)
-- list_files(path) - List files
-- read_file(path) - Read content
-- write_file(path, content) - Create/update
-- get_project_structure() - Tree view
-
-## Blueprint Tools (Pyodide)
-- validate_blueprint(path) - Check syntax
-- list_methods(path) - List @public/@view methods
-- compile_blueprint(path) - Compile in browser
-- execute_method(path, method_name, args) - Run method
-- run_tests(test_path) - Run pytest
-
-## dApp Tools (BEAM Sandbox)
-- bootstrap_nextjs(useTypeScript, useTailwind) - Create project
-- deploy_dapp() - Deploy all /dapp/ files
-- upload_files(paths) - Upload specific files
-- get_sandbox_url() - Get deployment URL
-- restart_dev_server() - Restart Next.js
-
-# Example Workflows
-
-## Example 1: Review Existing Blueprint
-
-User: "Please review my simple counter blueprint"
-
-You should:
-1. list_files("/") → See all files in the project
-2. Read the blueprint file (could be /contracts/SimpleCounter.py or /blueprints/Counter.py)
-3. Analyze and provide feedback
-
-## Example 2: Create a Blueprint
-
-User: "Create a Counter blueprint"
-
-You should:
-1. list_files("/") → Check existing structure first
-2. write_file('/contracts/Counter.py', <code>) → Use /contracts/ or /blueprints/
-3. validate_blueprint('/contracts/Counter.py')
-4. compile_blueprint('/contracts/Counter.py')
-5. execute_method('/contracts/Counter.py', 'initialize', [0])
-6. execute_method('/contracts/Counter.py', 'increment', [])
-7. execute_method('/contracts/Counter.py', 'get_count', [])
-
-## Example 3: Create a dApp
-
-User: "Create a simple todo dApp"
-
-You should:
-1. list_files("/") → Check existing structure
-2. bootstrap_nextjs(true, true) → Creates Next.js with TypeScript & Tailwind
-3. write_file('/dapp/app/page.tsx', <todo UI code>)
-4. write_file('/dapp/components/TodoList.tsx', <component code>)
-5. deploy_dapp() → Deploys to BEAM, returns URL
-6. Tell user: "Your dApp is live at <URL>"
-
-## Example 4: Full-Stack Project
-
-User: "Build a voting dApp with a blueprint backend"
-
-You should:
-1. list_files("/") → Check what exists
-2. write_file('/contracts/Voting.py', <voting contract>)
-3. compile_blueprint('/contracts/Voting.py')
-4. run_tests('/tests/test_voting.py')
-5. bootstrap_nextjs(true, true)
-6. write_file('/dapp/app/page.tsx', <voting UI>)
-7. deploy_dapp()
-
-Now you have both a blueprint (testable in browser) and a dApp (deployed)!
-
-# Important Notes
-
-- **Blueprints** execute in YOUR BROWSER using Pyodide (instant, no network)
-- **dApps** execute in BEAM CLOUD sandboxes (deployed, accessible via URL)
-- Both can be developed SIMULTANEOUSLY in the same project
-- Always be proactive about testing and deploying!`,
+      system: getSystemPrompt(),
 
       tools: {
         // ========== Shared Tools ==========
@@ -390,44 +229,6 @@ Now you have both a blueprint (testable in browser) and a dApp (deployed)!
           description: 'Run pytest tests in browser using Pyodide. IMPORTANT: test_path parameter is required.',
           parameters: z.object({
             test_path: z.string().describe('Path to test file (e.g., /tests/test_counter.py) - REQUIRED'),
-          }),
-        }),
-
-        // ========== dApp Tools ==========
-
-        bootstrap_nextjs: tool({
-          description: 'Bootstrap a new Next.js project in /dapp/. Creates all necessary files (package.json, app/page.tsx, etc.)',
-          parameters: z.object({
-            useTypeScript: z.boolean().optional().describe('Use TypeScript (default: true)'),
-            useTailwind: z.boolean().optional().describe('Use Tailwind CSS (default: true)'),
-          }),
-        }),
-
-        deploy_dapp: tool({
-          description: 'Deploy all /dapp/ files to BEAM sandbox. Returns the sandbox URL where the dApp is accessible.',
-          parameters: z.object({
-            _unused: z.string().optional().describe('Unused parameter'),
-          }),
-        }),
-
-        upload_files: tool({
-          description: 'Upload specific files to BEAM sandbox for hot reloading. Use after modifying dApp files.',
-          parameters: z.object({
-            paths: z.array(z.string()).describe('Array of file paths to upload (e.g., ["/dapp/app/page.tsx"])'),
-          }),
-        }),
-
-        get_sandbox_url: tool({
-          description: 'Get the BEAM sandbox URL for the current project',
-          parameters: z.object({
-            _unused: z.string().optional().describe('Unused parameter'),
-          }),
-        }),
-
-        restart_dev_server: tool({
-          description: 'Restart the Next.js dev server in BEAM sandbox',
-          parameters: z.object({
-            _unused: z.string().optional().describe('Unused parameter'),
           }),
         }),
       },

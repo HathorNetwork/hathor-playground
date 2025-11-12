@@ -121,12 +121,16 @@ export function IDE() {
     try {
       const { validateTestBlueprints } = await import('../utils/testParser');
       const { pyodideRunner } = await import('../lib/pyodide-runner');
+      const { useIDEStore } = await import('../store/ide-store');
 
       // Get the CURRENT content from the Monaco editor (not from store which might be stale)
       const currentTestContent = editorRef.current?.getValue() || activeFile.content;
 
+      // Get the LATEST files from the store (not from React props which might be stale)
+      const latestFiles = useIDEStore.getState().files;
+
       // Also get current content for contract files
-      const contractFiles = files.filter(f => f.type !== 'test').map(f => {
+      const contractFiles = latestFiles.filter(f => f.type !== 'test').map(f => {
         // If this file is currently open in the editor, get its current content
         if (f.id === activeFileId && editorRef.current) {
           return { ...f, content: editorRef.current.getValue() };

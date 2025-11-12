@@ -153,8 +153,7 @@ const FolderComponent: React.FC<FolderComponentProps> = ({ folder, level }) => {
       }
     }
 
-    const newFile: File = {
-      id: Date.now().toString(),
+    const newFile: Omit<File, 'id'> = {
       name: fileName,
       content: getFileTemplate(fileType, fileName),
       language,

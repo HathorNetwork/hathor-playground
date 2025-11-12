@@ -116,7 +116,33 @@ export class AIToolsClient {
    */
   static async writeFile(path: string, content: string): Promise<ToolResult> {
     try {
+      // Validate required parameters
+      if (!path || path === 'undefined') {
+        return {
+          success: false,
+          message: `❌ Missing required parameter: path`,
+          error: 'The path parameter is required and must be a valid file path (e.g., /contracts/MyContract.py)',
+        };
+      }
+
+      if (content === undefined || content === null) {
+        return {
+          success: false,
+          message: `❌ Missing required parameter: content`,
+          error: 'The content parameter is required and must contain the file contents',
+        };
+      }
+
       const { files, updateFile, addFile } = useIDEStore.getState();
+
+      // Reject __init__.py files (Python package files not needed for blueprints)
+      if (path.endsWith('__init__.py')) {
+        return {
+          success: false,
+          message: `❌ Cannot create __init__.py files`,
+          error: '__init__.py files are not needed for Hathor blueprints. Blueprint files should be standalone.',
+        };
+      }
 
       // Validate path
       const validPrefixes = ['/blueprints/', '/contracts/', '/tests/', '/dapp/'];
@@ -313,20 +339,27 @@ export class AIToolsClient {
 
       // If no contract instance and it's initialize, use blueprint_id
       if (!contractId) {
-        const compiled = compiledContracts.find(c => c.blueprint_id);
+        // Find the compiled contract for THIS specific file by fileId
+        const compiled = compiledContracts.find(c => c.fileId === file.id);
         if (methodName === 'initialize' && compiled) {
           contractId = compiled.blueprint_id;
         } else {
           return {
             success: false,
             message: `No contract instance found for ${path}`,
-            error: 'Compile the blueprint and initialize it first',
+            error: methodName === 'initialize'
+              ? 'Compile the blueprint first using compile_blueprint()'
+              : 'Compile the blueprint and call initialize() first',
           };
         }
       }
 
       // Initialize Pyodide if needed
       await pyodideRunner.initialize();
+
+      console.log(`[execute_method] Executing ${methodName} on ${path}`);
+      console.log(`[execute_method] Args:`, args);
+      console.log(`[execute_method] Contract ID:`, contractId);
 
       // Execute the method
       const result = await pyodideRunner.executeContract({
@@ -358,12 +391,24 @@ export class AIToolsClient {
           },
         };
       } else {
+        // Provide detailed error information
+        const errorMsg = [
+          `❌ Execution failed: ${methodName}()`,
+          ``,
+          `Error: ${result.error || 'Unknown error'}`,
+          result.traceback ? `\nTraceback:\n${result.traceback}` : '',
+        ].filter(Boolean).join('\n');
+
+        console.error(`[execute_method] Execution failed:`, result);
+
         return {
           success: false,
-          message: `❌ Execution failed: ${methodName}()`,
+          message: errorMsg,
           error: result.error || 'Unknown execution error',
           data: {
             traceback: result.traceback,
+            args_received: args,
+            method_name: methodName,
           },
         };
       }
@@ -966,7 +1011,7 @@ export default config;`,
       }
 
       // Add all files to store
-      files.forEach(file => addFile(file as any));
+      files.forEach(file => addFile(file));
 
       return {
         success: true,
