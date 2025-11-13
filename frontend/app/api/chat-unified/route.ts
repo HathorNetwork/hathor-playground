@@ -185,6 +185,13 @@ export async function POST(req: Request) {
           }),
         }),
 
+        delete_file: tool({
+          description: 'Delete a file by path',
+          parameters: z.object({
+            path: z.string().describe('File path to delete'),
+          }),
+        }),
+
         get_project_structure: tool({
           description: 'Get tree view of entire project',
           parameters: z.object({

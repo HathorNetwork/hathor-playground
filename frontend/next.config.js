@@ -7,17 +7,7 @@ const nextConfig = {
     appDir: true,
     instrumentationHook: true, // Enable instrumentation.ts loading
   },
-  async rewrites() {
-    // Use environment variable or default to localhost for development
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${backendUrl}/api/:path*`, // Proxy to Backend
-      },
-    ];
-  },
+  // Proxy removed - using Next.js API routes directly
   webpack: (config, { isServer }) => {
     // Monaco Editor and Pyodide need these fallbacks
     config.resolve.fallback = {

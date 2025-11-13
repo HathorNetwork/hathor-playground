@@ -1209,6 +1209,7 @@ run_tests(test_path="/tests/test_my_contract.py")
 - **list_files(path)**: List files in directory (start with "/")
 - **read_file(path)**: Read file content
 - **write_file(path, content)**: Create or update file
+- **delete_file(path)**: Delete a file by path
 - **get_project_structure()**: Tree view of all files
 
 #### Blueprint Tools
@@ -1322,6 +1323,86 @@ You can also build full-stack dApps that interact with Hathor Blueprints!
 
 ---
 
+## ⚠️ ERROR HANDLING & TOOL FAILURES
+
+### When Tools Fail - CRITICAL RULES
+
+**NEVER retry the same failed tool call without changing something!** This causes infinite loops.
+
+#### Rule 1: Read the Error Message
+When a tool returns `success: false`, the `error` and `message` fields tell you WHY it failed.
+
+#### Rule 2: Understand Common Failures
+
+**"No sandbox found"** → The sandbox needs to be created first
+- **Fix**: Call `deploy_dapp()` first to create the sandbox
+- **DO NOT**: Keep calling `get_sandbox_url()` in a loop
+
+**"File not found"** → The path is wrong or file doesn't exist
+- **Fix**: Call `list_files("/")` to see what files exist
+- **DO NOT**: Retry with the same wrong path
+
+**"No active project"** → No project selected in the IDE
+- **Fix**: Ask user to create/select a project
+- **DO NOT**: Keep retrying the tool
+
+**"Missing required parameter"** → You forgot a required argument
+- **Fix**: Read the error message, provide the missing parameter
+- **DO NOT**: Retry without the parameter
+
+**"Could not get or create sandbox"** → BEAM service issue
+- **Fix**: Check error details, may need to wait or retry ONCE
+- **DO NOT**: Retry more than once - report to user instead
+
+#### Rule 3: Change Strategy After Failure
+
+If a tool fails:
+1. **Read the error** - What went wrong?
+2. **Try a different approach** - Don't repeat the same call
+3. **If stuck** - Explain the problem to the user and ask for help
+
+#### Examples of Good Error Handling
+
+❌ **BAD - Infinite Loop**:
+```
+1. Call get_sandbox_url() → "No sandbox found"
+2. Call get_sandbox_url() → "No sandbox found" [LOOP DETECTED]
+3. Call get_sandbox_url() → "No sandbox found" [LOOP DETECTED]
+```
+
+✅ **GOOD - Problem Solving**:
+```
+1. Call get_sandbox_url() → "No sandbox found"
+2. Realize: Need to deploy first
+3. Call deploy_dapp() → Success
+4. Call get_sandbox_url() → Returns URL
+```
+
+❌ **BAD - Ignoring Error Details**:
+```
+1. Call run_tests() → "Missing test_path parameter"
+2. Call run_tests() → "Missing test_path parameter" [LOOP]
+```
+
+✅ **GOOD - Reading Error Message**:
+```
+1. Call run_tests() → "Missing test_path parameter. Example: run_tests({test_path: '/tests/test_counter.py'})"
+2. Call list_files("/tests") → See available test files
+3. Call run_tests({test_path: "/tests/test_counter.py"}) → Success
+```
+
+#### Rule 4: Report Persistent Errors
+
+If you've tried multiple different approaches and tools keep failing:
+1. **Stop retrying** - You're likely hitting a real issue
+2. **Explain the problem** - Tell user what you tried and what failed
+3. **Ask for help** - Request user to check their environment/setup
+
+**Example**:
+"I tried deploying your dApp but the BEAM sandbox creation is failing with: [error details]. This might be a configuration issue. Can you check that your BEAM credentials are set correctly in .env.local?"
+
+---
+
 ## 🎓 REMEMBER
 
 ### Blueprint Development
@@ -1340,6 +1421,12 @@ You can also build full-stack dApps that interact with Hathor Blueprints!
 11. **Install packages properly**: Use `run_command("npm install package")`, then `read_sandbox_files()`
 12. **Check logs**: Use `get_sandbox_logs()` to debug deployment issues
 13. **Two-way sync**: `read_sandbox_files()` syncs sandbox files back to IDE
+
+### Error Handling
+14. **Read error messages**: When tools fail, check `error` and `message` fields
+15. **Never retry blindly**: Don't repeat the same failed call - change your approach
+16. **Stop after 2-3 attempts**: If multiple approaches fail, explain to user and ask for help
+17. **Learn from errors**: Common errors tell you what to do next (see Error Handling section)
 
 ---
 

@@ -27,12 +27,24 @@ export const AgenticChatUnified: React.FC = () => {
   const toolRoundCounterRef = useRef(0);
   const MAX_TOOL_ROUNDS = 10; // Limit to prevent infinite loops
 
+  // Track failed tool calls to prevent infinite retries
+  // Map format: "toolName:argsHash" -> failure count
+  const failedToolCallsRef = useRef<Map<string, number>>(new Map());
+  const MAX_RETRIES_PER_TOOL = 2; // Allow 2 attempts, block the 3rd
+
   // Use local state for input since AI SDK's input handler isn't working
   const [localInput, setLocalInput] = React.useState('');
 
   // Create refs for functions we need in callbacks
   const sendMessageRef = useRef<any>(null);
   const addToolResultRef = useRef<any>(null);
+
+  // Helper to create a unique key for a tool call
+  const getToolCallKey = (toolName: string, args: any): string => {
+    // Create a stable hash of the arguments
+    const argsString = JSON.stringify(args, Object.keys(args).sort());
+    return `${toolName}:${argsString}`;
+  };
 
   const { messages, setMessages, sendMessage, addToolResult, status } = useChat({
     sendAutomaticallyWhen: (opts) => {
@@ -72,6 +84,30 @@ export const AgenticChatUnified: React.FC = () => {
 
       console.log('🔧 Tool call:', toolName, args);
       console.log('🔧 Tool call ID:', toolCall.toolCallId);
+
+      // CHECK FOR REPEATED FAILURES - Prevent infinite retry loops!
+      const toolCallKey = getToolCallKey(toolName, args);
+      const failureCount = failedToolCallsRef.current.get(toolCallKey) || 0;
+
+      if (failureCount >= MAX_RETRIES_PER_TOOL) {
+        const blockedResult = {
+          success: false,
+          message: `🚫 BLOCKED: This exact tool call has failed ${failureCount} times already. Refusing to retry again to prevent infinite loop.`,
+          error: `The tool "${toolName}" with these exact arguments has failed ${failureCount} times. Try a different approach or ask the user for help. DO NOT retry this same call.`,
+        };
+
+        console.error(`🚫 BLOCKED repeated failure:`, toolName, args, `(${failureCount} failures)`);
+        addConsoleMessage('error', blockedResult.message);
+
+        addToolResult({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          output: blockedResult,
+        });
+
+        return JSON.stringify(blockedResult);
+      }
+
       addConsoleMessage('info', `🔧 Executing: ${toolName}(${JSON.stringify(args).slice(0, 100)})`);
 
       try {
@@ -90,6 +126,10 @@ export const AgenticChatUnified: React.FC = () => {
 
           case 'write_file':
             result = await AIToolsClient.writeFile(args.path, args.content);
+            break;
+
+          case 'delete_file':
+            result = await AIToolsClient.deleteFile(args.path);
             break;
 
           case 'get_project_structure':
@@ -190,14 +230,22 @@ export const AgenticChatUnified: React.FC = () => {
         // Log to console
         if (result.success) {
           addConsoleMessage('success', result.message);
+          // SUCCESS: Clear failure count for this tool call
+          failedToolCallsRef.current.delete(toolCallKey);
         } else {
           addConsoleMessage('error', result.message);
+          // FAILURE: Increment failure count for this exact tool call
+          const newFailureCount = (failedToolCallsRef.current.get(toolCallKey) || 0) + 1;
+          failedToolCallsRef.current.set(toolCallKey, newFailureCount);
+          console.warn(`⚠️ Tool failure #${newFailureCount} for:`, toolName, args);
         }
 
+        // CRITICAL: Send the FULL result (including success, message, error) to the LLM
+        // Not just result.data! The LLM needs to see error messages to avoid retry loops
         addToolResult({
           tool: toolCall.toolName,
           toolCallId: toolCall.toolCallId,
-          output: result.data,
+          output: result, // Send full result object, not just result.data
         });
 
         // Return result (required by AI SDK)
@@ -205,6 +253,11 @@ export const AgenticChatUnified: React.FC = () => {
       } catch (error: any) {
         console.error('Tool execution error:', error);
         addConsoleMessage('error', `❌ Tool error: ${error.message}`);
+
+        // EXCEPTION: Also track as failure
+        const newFailureCount = (failedToolCallsRef.current.get(toolCallKey) || 0) + 1;
+        failedToolCallsRef.current.set(toolCallKey, newFailureCount);
+        console.warn(`⚠️ Tool exception #${newFailureCount} for:`, toolName, args);
 
         const errorResult = {
           success: false,
@@ -236,6 +289,8 @@ export const AgenticChatUnified: React.FC = () => {
   const handleClearChat = () => {
     setMessages([]);
     setLocalInput('');
+    toolRoundCounterRef.current = 0;
+    failedToolCallsRef.current.clear(); // Reset failure tracking on clear
     if (activeProjectId) {
       localStorage.removeItem(`agentic-chat-unified-${activeProjectId}`);
     }
@@ -257,6 +312,11 @@ export const AgenticChatUnified: React.FC = () => {
 
     // Reset tool round counter for new user message
     toolRoundCounterRef.current = 0;
+
+    // IMPORTANT: Reset failed tool call tracking when user sends new message
+    // This gives the LLM a fresh start for each conversation turn
+    failedToolCallsRef.current.clear();
+    console.log('🔄 Reset failure tracking for new user message');
 
     // Use sendMessage from useChat (new API with onToolCall)
     try {

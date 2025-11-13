@@ -200,6 +200,41 @@ export class AIToolsClient {
   }
 
   /**
+   * Delete a file by path
+   */
+  static async deleteFile(path: string): Promise<ToolResult> {
+    try {
+      const { files, deleteFile } = useIDEStore.getState();
+
+      // Find the file by path
+      const file = files.find(f => f.path === path);
+
+      if (!file) {
+        return {
+          success: false,
+          message: `❌ File not found: ${path}`,
+          error: `Cannot delete non-existent file. Available files: ${files.map(f => f.path).join(', ')}`,
+        };
+      }
+
+      // Delete the file
+      deleteFile(file.id);
+
+      return {
+        success: true,
+        message: `✅ Deleted ${path}`,
+        data: { path, action: 'deleted' },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to delete file: ${path}`,
+        error: String(error),
+      };
+    }
+  }
+
+  /**
    * Get project structure as a tree
    */
   static async getProjectStructure(): Promise<ToolResult> {
@@ -680,8 +715,34 @@ export class AIToolsClient {
 
       addConsoleMessage?.('info', '🚀 Deploying dApp to BEAM sandbox...');
 
+      // Start streaming build logs (will connect and wait for sandbox creation)
+      let buildLogStream: EventSource | null = null;
+      try {
+        buildLogStream = beamClient.streamBuildLogs(
+          activeProjectId,
+          (log) => {
+            // Display each build log line in console
+            addConsoleMessage?.('info', log);
+          },
+          (error) => {
+            console.error('Build log stream error:', error);
+          },
+          () => {
+            console.log('Build log stream completed');
+          }
+        );
+      } catch (streamError) {
+        console.warn('Failed to start build log stream:', streamError);
+        // Continue anyway - build logs are nice-to-have
+      }
+
       // Deploy to BEAM
       const url = await beamClient.deployDApp(activeProjectId, filesMap);
+
+      // Close build log stream after deployment
+      if (buildLogStream) {
+        buildLogStream.close();
+      }
 
       return {
         success: true,

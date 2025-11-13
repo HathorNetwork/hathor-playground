@@ -172,6 +172,44 @@ export class BeamClient {
 
     return eventSource;
   }
+
+  /**
+   * Stream build logs from sandbox creation using Server-Sent Events
+   * Returns an EventSource that emits build log lines in real-time
+   */
+  streamBuildLogs(projectId: string, onLog: (log: string) => void, onError?: (error: Event) => void, onComplete?: () => void): EventSource {
+    const eventSource = new EventSource(`${API_BASE}/sandbox/${projectId}/build-logs`);
+
+    eventSource.onmessage = (event) => {
+      onLog(event.data);
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('Build log SSE Error:', error);
+
+      // Close the connection
+      eventSource.close();
+
+      // Notify complete callback
+      if (onComplete) {
+        onComplete();
+      }
+
+      // Notify error callback
+      if (onError) {
+        onError(error);
+      } else {
+        console.warn('Build log streaming closed.');
+      }
+    };
+
+    // Handle when connection opens successfully
+    eventSource.onopen = () => {
+      console.log('Build log stream connected for project:', projectId);
+    };
+
+    return eventSource;
+  }
 }
 
 // Global instance
