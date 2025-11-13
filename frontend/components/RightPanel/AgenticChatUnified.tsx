@@ -165,6 +165,18 @@ export const AgenticChatUnified: React.FC = () => {
             result = await AIToolsClient.restartDevServer();
             break;
 
+          case 'run_command':
+            result = await AIToolsClient.runCommand(args.command);
+            break;
+
+          case 'read_sandbox_files':
+            result = await AIToolsClient.readSandboxFiles(args.path);
+            break;
+
+          case 'get_sandbox_logs':
+            result = await AIToolsClient.getSandboxLogs(args.lines || 50);
+            break;
+
           default:
             result = {
               success: false,

@@ -1030,4 +1030,210 @@ export default config;`,
       };
     }
   }
+
+  /**
+   * Run a shell command in the BEAM sandbox
+   */
+  static async runCommand(command: string): Promise<ToolResult> {
+    try {
+      const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
+
+      addConsoleMessage?.('info', `$ ${command}`);
+
+      const response = await fetch(`/api/beam/sandbox/${activeProjectId}/command`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ command }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        return {
+          success: false,
+          message: '❌ Command failed',
+          error: error.error || response.statusText,
+        };
+      }
+
+      const result = await response.json();
+
+      // Display stdout
+      if (result.stdout) {
+        addConsoleMessage?.('info', result.stdout);
+      }
+
+      // Display stderr if present
+      if (result.stderr) {
+        addConsoleMessage?.('error', result.stderr);
+      }
+
+      return {
+        success: true,
+        message: `✅ Command executed successfully`,
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: '❌ Failed to run command',
+        error: String(error),
+      };
+    }
+  }
+
+  /**
+   * Read files from BEAM sandbox (for two-way sync)
+   */
+  static async readSandboxFiles(path?: string): Promise<ToolResult> {
+    try {
+      const { activeProjectId, updateFile, addFile, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
+
+      addConsoleMessage?.('info', `📥 Reading files from sandbox${path ? ` (${path})` : ''}...`);
+
+      const queryParams = path ? `?path=${encodeURIComponent(path)}` : '';
+      const response = await fetch(`/api/beam/sandbox/${activeProjectId}/files${queryParams}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        return {
+          success: false,
+          message: '❌ Failed to read files',
+          error: error.error || response.statusText,
+        };
+      }
+
+      const result = await response.json();
+      const files = result.files || {};
+      const fileCount = Object.keys(files).length;
+
+      if (fileCount === 0) {
+        return {
+          success: true,
+          message: '📁 No files found in sandbox',
+          data: { files },
+        };
+      }
+
+      // Sync files back to IDE store
+      for (const [filePath, content] of Object.entries(files)) {
+        // Try to find existing file
+        const existingFile = useIDEStore.getState().files.find(f => f.path === filePath);
+
+        if (existingFile) {
+          // Update existing file
+          updateFile?.(existingFile.id, content as string);
+        } else {
+          // Create new file
+          const fileName = filePath.split('/').pop() || 'unknown';
+          const fileExt = fileName.split('.').pop() || '';
+
+          let language: any = 'plaintext';
+          let type: any = 'component';
+
+          if (fileExt === 'tsx' || fileExt === 'jsx') {
+            language = fileExt === 'tsx' ? 'typescriptreact' : 'javascriptreact';
+            type = 'component';
+          } else if (fileExt === 'ts' || fileExt === 'js') {
+            language = fileExt === 'ts' ? 'typescript' : 'javascript';
+            type = 'component';
+          } else if (fileExt === 'json') {
+            language = 'json';
+            type = 'config';
+          } else if (fileExt === 'css') {
+            language = 'css';
+            type = 'style';
+          }
+
+          addFile?.({
+            name: fileName,
+            path: filePath,
+            content: content as string,
+            language,
+            type,
+          });
+        }
+      }
+
+      addConsoleMessage?.('success', `✅ Synced ${fileCount} files from sandbox`);
+
+      return {
+        success: true,
+        message: `✅ Read ${fileCount} files from sandbox and synced to IDE`,
+        data: { files, count: fileCount },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: '❌ Failed to read sandbox files',
+        error: String(error),
+      };
+    }
+  }
+
+  /**
+   * Get recent logs from BEAM sandbox dev server
+   */
+  static async getSandboxLogs(lines: number = 50): Promise<ToolResult> {
+    try {
+      const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
+
+      addConsoleMessage?.('info', `📋 Fetching last ${lines} log lines...`);
+
+      const response = await fetch(`/api/beam/sandbox/${activeProjectId}/recent-logs?lines=${lines}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        return {
+          success: false,
+          message: '❌ Failed to get logs',
+          error: error.error || response.statusText,
+        };
+      }
+
+      const result = await response.json();
+      const logs = result.logs || '';
+
+      if (logs) {
+        addConsoleMessage?.('info', logs);
+      }
+
+      return {
+        success: true,
+        message: `✅ Retrieved ${lines} log lines`,
+        data: { logs },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: '❌ Failed to get sandbox logs',
+        error: String(error),
+      };
+    }
+  }
 }

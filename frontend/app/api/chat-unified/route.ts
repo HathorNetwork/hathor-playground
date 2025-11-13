@@ -231,6 +231,65 @@ export async function POST(req: Request) {
             test_path: z.string().describe('Path to test file (e.g., /tests/test_counter.py) - REQUIRED'),
           }),
         }),
+
+        // ========== dApp Tools (BEAM Sandbox) ==========
+
+        deploy_dapp: tool({
+          description: 'Deploy all /dapp/ files to BEAM sandbox. Creates sandbox if needed, uploads files, starts dev server.',
+          parameters: z.object({
+            _unused: z.string().optional().describe('No parameters needed'),
+          }),
+        }),
+
+        upload_files: tool({
+          description: 'Upload specific files to BEAM sandbox (for incremental updates)',
+          parameters: z.object({
+            paths: z.array(z.string()).describe('Array of file paths to upload (e.g., ["/dapp/app/page.tsx"])'),
+          }),
+        }),
+
+        get_sandbox_url: tool({
+          description: 'Get the live URL of the deployed dApp sandbox',
+          parameters: z.object({
+            _unused: z.string().optional().describe('No parameters needed'),
+          }),
+        }),
+
+        restart_dev_server: tool({
+          description: 'Restart the Next.js dev server in the sandbox',
+          parameters: z.object({
+            _unused: z.string().optional().describe('No parameters needed'),
+          }),
+        }),
+
+        bootstrap_nextjs: tool({
+          description: 'Create a new Next.js project scaffold with TypeScript and Tailwind',
+          parameters: z.object({
+            use_typescript: z.boolean().optional().describe('Use TypeScript (default: true)'),
+            use_tailwind: z.boolean().optional().describe('Use Tailwind CSS (default: true)'),
+          }),
+        }),
+
+        run_command: tool({
+          description: 'Execute a shell command in the BEAM sandbox (e.g., npm install, npm run build)',
+          parameters: z.object({
+            command: z.string().describe('Shell command to execute'),
+          }),
+        }),
+
+        read_sandbox_files: tool({
+          description: 'Read files from BEAM sandbox back to IDE (two-way sync). Use after running commands that generate files.',
+          parameters: z.object({
+            path: z.string().optional().describe('Directory path to read from (default: /app)'),
+          }),
+        }),
+
+        get_sandbox_logs: tool({
+          description: 'Get recent logs from the sandbox dev server for debugging',
+          parameters: z.object({
+            lines: z.number().optional().describe('Number of log lines to retrieve (default: 50)'),
+          }),
+        }),
       },
 
       // NO maxSteps - client handles multi-turn via sendAutomaticallyWhen

@@ -250,3 +250,68 @@ async def stream_sandbox_events(project_id: str):
             "X-Accel-Buffering": "no",
         }
     )
+
+
+class CommandRequest(BaseModel):
+    """Request to run a command in sandbox"""
+    command: str
+
+
+@router.post("/sandbox/{project_id}/command")
+async def run_command(project_id: str, request: CommandRequest):
+    """
+    Execute a shell command in the sandbox
+
+    Args:
+        project_id: Project identifier
+        request: CommandRequest with command to run
+
+    Returns:
+        Command output with stdout, stderr, and exit code
+    """
+    try:
+        result = await beam_service.run_command(project_id, request.command)
+        return result
+    except Exception as e:
+        logger.error("Failed to run command", project_id=project_id, command=request.command, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to run command: {str(e)}")
+
+
+@router.get("/sandbox/{project_id}/files")
+async def download_files(project_id: str, path: str = "/app"):
+    """
+    Download files from the sandbox
+
+    Args:
+        project_id: Project identifier
+        path: Directory path to download from (default: /app)
+
+    Returns:
+        Dictionary mapping file paths to content
+    """
+    try:
+        files = await beam_service.download_files(project_id, path)
+        return {"files": files}
+    except Exception as e:
+        logger.error("Failed to download files", project_id=project_id, path=path, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to download files: {str(e)}")
+
+
+@router.get("/sandbox/{project_id}/recent-logs")
+async def get_recent_logs(project_id: str, lines: int = 50):
+    """
+    Get recent logs from the dev server
+
+    Args:
+        project_id: Project identifier
+        lines: Number of recent log lines to return (default: 50)
+
+    Returns:
+        Recent logs as string
+    """
+    try:
+        logs = await beam_service.get_recent_logs(project_id, lines)
+        return {"logs": logs}
+    except Exception as e:
+        logger.error("Failed to get recent logs", project_id=project_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to get recent logs: {str(e)}")
