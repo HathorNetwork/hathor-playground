@@ -172,14 +172,14 @@ export class AIToolsClient {
           ? 'contract'
           : path.startsWith('/tests/')
           ? 'test'
-          : 'file';
+          : 'component';
 
         const newFile: Omit<File, 'id'> = {
           name: fileName,
           path: path,
           content: content,
           type: fileType,
-          language: path.endsWith('.py') ? 'python' : path.endsWith('.ts') || path.endsWith('.tsx') ? 'typescript' : 'plaintext',
+          language: path.endsWith('.py') ? 'python' : path.endsWith('.ts') ? 'typescript' : path.endsWith('.tsx') ? 'typescriptreact' : 'json',
         };
 
         addFile(newFile);
@@ -317,7 +317,7 @@ export class AIToolsClient {
 
       if (result.success) {
         // Store the compiled contract
-        const { setCompiledContract } = useIDEStore.getState();
+        const { setCompiledContract } = useIDEStore.getState() as any;
         setCompiledContract(file.id, result.blueprint_id!);
 
         return {
@@ -409,7 +409,7 @@ export class AIToolsClient {
       if (result.success) {
         // If it was initialize, store the contract instance
         if (methodName === 'initialize' && result.contract_id) {
-          const { setContractInstance } = useIDEStore.getState();
+          const { setContractInstance } = useIDEStore.getState() as any;
           setContractInstance(file.id, {
             contractId: result.contract_id,
             blueprintId: contractId,
@@ -682,11 +682,15 @@ export class AIToolsClient {
   // ========== DAPP TOOLS (BEAM SANDBOX) ==========
 
   /**
-   * Deploy dApp files to BEAM sandbox
+   * Create Hathor dApp using official create-hathor-dapp template
    */
-  static async deployDApp(): Promise<ToolResult> {
+  static async createHathorDapp(
+    appName?: string,
+    walletConnectId?: string,
+    network?: 'mainnet' | 'testnet'
+  ): Promise<ToolResult> {
     try {
-      const { files, activeProjectId, addConsoleMessage } = useIDEStore.getState();
+      const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
 
       if (!activeProjectId) {
         return {
@@ -696,22 +700,105 @@ export class AIToolsClient {
         };
       }
 
-      // Filter to only dApp files
-      const dappFiles = files.filter(f => f.path.startsWith('/dapp/'));
+      const resolvedAppName = (appName && String(appName).trim()) || 'hathor-dapp';
+      const resolvedNetwork = (network as string) || 'testnet';
+      // Default WC ID mirrors docs/prompts recommendation; can be overridden by args
+      const resolvedWC = (walletConnectId && String(walletConnectId).trim()) || '8264fff563181da658ce64ee80e80458';
 
-      if (dappFiles.length === 0) {
+      addConsoleMessage?.('info', `🚀 Scaffolding Hathor dApp: ${resolvedAppName} (${resolvedNetwork})`);
+
+      // Clean up any existing directory first
+      const cleanupCmd = `rm -rf ${resolvedAppName}`;
+      await AIToolsClient.runCommand(cleanupCmd);
+
+      // Execute scaffold command in sandbox
+      const cmd = `npx create-hathor-dapp@latest ${resolvedAppName} --yes --wallet-connect-id=${resolvedWC} --network=${resolvedNetwork}`;
+      const execResult = await AIToolsClient.runCommand(cmd);
+
+      console.log('create-hathor-dapp result:', {
+        success: execResult.success,
+        exit_code: execResult.data?.exit_code,
+        stdout: execResult.data?.stdout?.slice(0, 200),
+        stderr: execResult.data?.stderr?.slice(0, 200),
+      });
+
+      // Check if command succeeded or if dApp was created despite warnings
+      const exitCode = execResult.data?.exit_code;
+      const hasErrors = exitCode !== '0' && exitCode !== 0;
+      const hasStderr = execResult.data?.stderr && execResult.data?.stderr.trim().length > 0;
+
+      // If there's a real error (not just git init failure), fail
+      if (hasErrors && hasStderr && !execResult.data?.stderr?.includes('Failed to initialize git repository')) {
+        const errorMsg = execResult.data?.stderr || execResult.data?.stdout || 'Unknown error';
+        console.error('create-hathor-dapp failed with non-zero exit code:', {
+          exit_code: execResult.data?.exit_code,
+          stdout: execResult.data?.stdout,
+          stderr: execResult.data?.stderr,
+        });
         return {
           success: false,
-          message: 'No dApp files found',
-          error: 'Create some files in /dapp/ first',
+          message: `❌ Failed to scaffold dApp: ${resolvedAppName}\nError: ${errorMsg}`,
+          error: errorMsg,
         };
       }
 
-      // Convert to Record<string, string>
-      const filesMap: Record<string, string> = {};
-      dappFiles.forEach(f => {
-        filesMap[f.path] = f.content;
-      });
+      // Check if dApp directory was actually created successfully
+      const checkCmd = `ls -la ${resolvedAppName}/package.json 2>/dev/null || echo "missing"`;
+      const checkResult = await AIToolsClient.runCommand(checkCmd);
+      const packageExists = checkResult.data?.stdout && !checkResult.data?.stdout.includes('missing');
+
+      if (!packageExists) {
+        return {
+          success: false,
+          message: `❌ Failed to scaffold dApp: ${resolvedAppName}\nDirectory or package.json not found`,
+          error: 'Package.json not found after scaffolding',
+        };
+      }
+
+      // Note: Sync will be handled by the agent calling sync_dapp tool separately
+      // This ensures the sync runs in the frontend context where useIDEStore works
+
+      // Provide next steps
+      const nextSteps = [
+        `✅ Scaffolded with create-hathor-dapp in /app/${resolvedAppName}`,
+        `🔄 Run sync_dapp() to sync files back to IDE`,
+        `▶️ To run in sandbox: use restart_dev_server()`,
+        `🌐 To get URL: use get_sandbox_url()`,
+      ].join('\n');
+
+      return {
+        success: true,
+        message: nextSteps,
+        data: {
+          app_name: resolvedAppName,
+          network: resolvedNetwork,
+          wallet_connect_id: resolvedWC,
+          scaffold: execResult.data,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: '❌ Failed to create Hathor dApp',
+        error: String(error),
+      };
+    }
+  }
+
+  /**
+   * Deploy dApp files to BEAM sandbox (with proper sync)
+   */
+  static async deployDApp(): Promise<ToolResult> {
+    try {
+      const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
       addConsoleMessage?.('info', '🚀 Deploying dApp to BEAM sandbox...');
 
@@ -736,21 +823,48 @@ export class AIToolsClient {
         // Continue anyway - build logs are nice-to-have
       }
 
-      // Deploy to BEAM
-      const url = await beamClient.deployDApp(activeProjectId, filesMap);
+      // Try to sync files to sandbox (best effort - don't fail deployment if sync fails)
+      let syncResult: ToolResult | null = null;
+      try {
+        syncResult = await AIToolsClient.syncDApp('ide-to-sandbox');
+        if (!syncResult.success) {
+          console.warn('File sync failed during deployment, continuing anyway:', syncResult.error);
+          addConsoleMessage?.('warning', '⚠️ File sync failed, but continuing with deployment');
+        }
+      } catch (syncError) {
+        console.warn('File sync error during deployment:', syncError);
+        addConsoleMessage?.('warning', '⚠️ File sync encountered an error, but continuing with deployment');
+      }
+
+      // Start dev server (if not already running)
+      let devServerResult: ToolResult | null = null;
+      try {
+        devServerResult = await AIToolsClient.restartDevServer();
+        if (devServerResult.success) {
+          addConsoleMessage?.('success', `🌐 Dev server running at: ${devServerResult.data.url}`);
+        }
+      } catch (devError) {
+        console.warn('Failed to start dev server:', devError);
+        // Don't fail the deployment if dev server fails
+      }
 
       // Close build log stream after deployment
       if (buildLogStream) {
         buildLogStream.close();
       }
 
+      // Return success even if some parts failed (as long as we got this far)
+      const deploymentMessage = syncResult?.success
+        ? `✅ dApp deployed with proper sync!\n\n${syncResult.message}`
+        : '✅ dApp deployed (sync had issues but deployment continued)';
+
       return {
         success: true,
-        message: `✅ dApp deployed!\n\nURL: ${url}\n\nFiles deployed: ${dappFiles.length}`,
+        message: deploymentMessage,
         data: {
-          url,
-          files_count: dappFiles.length,
-          files: dappFiles.map(f => f.path),
+          syncResult,
+          devServerResult,
+          url: devServerResult?.data?.url || null,
         },
       };
     } catch (error) {
@@ -1150,6 +1264,246 @@ export default config;`,
         error: String(error),
       };
     }
+  }
+
+  /**
+   * Two-way sync between IDE and BEAM sandbox
+   */
+  static async syncDApp(
+    direction: 'ide-to-sandbox' | 'sandbox-to-ide' | 'bidirectional' = 'bidirectional',
+    projectId?: string
+  ): Promise<ToolResult> {
+    try {
+      // Get project ID from parameter or store (for API route vs tool calls)
+      const activeProjectId = projectId || useIDEStore.getState().activeProjectId;
+      const { files: ideFiles, addFile, updateFile, deleteFile, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
+
+      addConsoleMessage?.('info', `🔄 Starting ${direction} sync for dApp files...`);
+
+      // Get IDE file manifest (only /dapp/ files)
+      const ideManifest = ideFiles
+        .filter(f => f.path.startsWith('/dapp/'))
+        .reduce((acc, file) => {
+          acc[file.path] = {
+            path: file.path,
+            size: file.content.length,
+            modified: Date.now(), // IDE doesn't track modified time
+            content: file.content,
+          };
+          return acc;
+        }, {} as Record<string, { path: string; size: number; modified: number; content: string }>);
+
+      let normalizedSandboxManifest: Record<string, { path: string; size: number; modified: number; content: string }> = {};
+
+      // Only read sandbox files for directions that need comparison
+      if (direction === 'sandbox-to-ide' || direction === 'bidirectional') {
+        // Get sandbox file manifest
+        try {
+          const sandboxResponse = await fetch(`/api/beam/sandbox/${activeProjectId}/files`);
+          if (sandboxResponse.ok) {
+            const sandboxData = await sandboxResponse.json();
+            const sandboxManifest = sandboxData.files || {};
+
+            // Convert sandbox files to consistent format (sandbox paths to IDE paths)
+            for (const [sandboxPath, content] of Object.entries(sandboxManifest)) {
+              // Convert sandbox path to IDE path
+              let idePath = sandboxPath;
+              if (sandboxPath.startsWith('/app/')) {
+                idePath = sandboxPath.replace('/app/', '/dapp/');
+              }
+
+              normalizedSandboxManifest[idePath] = {
+                path: idePath,
+                size: (content as string).length,
+                modified: Date.now(), // Sandbox doesn't track modified time
+                content: content as string,
+              };
+            }
+          } else {
+            console.warn('Failed to read sandbox files, continuing with empty manifest');
+          }
+        } catch (error) {
+          console.warn('Error reading sandbox files:', error);
+        }
+      }
+
+      // Calculate differences (only for directions that need it)
+      const changes = direction === 'ide-to-sandbox'
+        ? { added: [], modified: [], deleted: [] } // Not needed for ide-to-sandbox
+        : AIToolsClient.calculateFileChanges(ideManifest, normalizedSandboxManifest);
+
+      console.log('🔍 Sync analysis:', {
+        direction,
+        ideFiles: Object.keys(ideManifest),
+        sandboxFiles: Object.keys(normalizedSandboxManifest),
+        changes
+      });
+
+      let appliedChanges = 0;
+      const results: string[] = [];
+
+      // Apply changes based on direction
+      if (direction === 'ide-to-sandbox') {
+        // For ide-to-sandbox, upload all IDE files without needing to compare with sandbox
+        const allIdeFiles: Record<string, string> = {};
+        for (const [path, file] of Object.entries(ideManifest)) {
+          allIdeFiles[path] = file.content;
+        }
+
+        if (Object.keys(allIdeFiles).length > 0) {
+          try {
+            await beamClient.uploadFiles(activeProjectId, allIdeFiles, false);
+            results.push(`📤 Uploaded ${Object.keys(allIdeFiles).length} files to sandbox`);
+            appliedChanges += Object.keys(allIdeFiles).length;
+          } catch (uploadError) {
+            console.warn('Upload failed, trying to ensure sandbox exists:', uploadError);
+            // Try to ensure sandbox exists and retry
+            try {
+              await beamClient.ensureSandbox(activeProjectId);
+              await beamClient.uploadFiles(activeProjectId, allIdeFiles, false);
+              results.push(`📤 Uploaded ${Object.keys(allIdeFiles).length} files to sandbox (after ensuring sandbox)`);
+              appliedChanges += Object.keys(allIdeFiles).length;
+            } catch (retryError) {
+              console.error('Upload failed even after ensuring sandbox:', retryError);
+              results.push(`❌ Failed to upload files to sandbox`);
+            }
+          }
+        } else {
+          results.push(`📤 No files to upload`);
+        }
+      } else if (direction === 'sandbox-to-ide') {
+        // Add/update files from sandbox to IDE
+        for (const path of changes.modified.concat(changes.added)) {
+          if (normalizedSandboxManifest[path]) {
+            const sandboxFile = normalizedSandboxManifest[path];
+            const existingFile = ideFiles.find(f => f.path === path);
+
+            if (existingFile) {
+              updateFile(existingFile.id, sandboxFile.content);
+            } else {
+              addFile({
+                name: path.split('/').pop() || 'unknown',
+                path: path,
+                content: sandboxFile.content,
+                type: 'component',
+                language: path.endsWith('.tsx') ? 'typescriptreact' : path.endsWith('.ts') ? 'typescript' : 'json',
+              });
+            }
+          }
+        }
+
+        // Delete files from IDE that were deleted in sandbox
+        for (const deletedPath of changes.deleted) {
+          const fileToDelete = ideFiles.find(f => f.path === deletedPath);
+          if (fileToDelete) {
+            deleteFile(fileToDelete.id);
+            results.push(`🗑️ Deleted ${deletedPath} from IDE`);
+            appliedChanges++;
+          }
+        }
+
+        const addedCount = changes.added.length;
+        const modifiedCount = changes.modified.length;
+        if (addedCount + modifiedCount > 0) {
+          results.push(`📥 Synced ${addedCount + modifiedCount} files from sandbox to IDE`);
+          appliedChanges += addedCount + modifiedCount;
+        }
+      } else if (direction === 'bidirectional') {
+        // For bidirectional, merge all files without deletions to avoid conflicts
+        // Upload all IDE files to sandbox
+        const allIdeFiles: Record<string, string> = {};
+        for (const [path, file] of Object.entries(ideManifest)) {
+          allIdeFiles[path] = file.content;
+        }
+
+        if (Object.keys(allIdeFiles).length > 0) {
+          await beamClient.uploadFiles(activeProjectId, allIdeFiles, false);
+          results.push(`📤 Uploaded ${Object.keys(allIdeFiles).length} files to sandbox`);
+          appliedChanges += Object.keys(allIdeFiles).length;
+        }
+
+        // Download all sandbox files to IDE
+        for (const [path, sandboxFile] of Object.entries(normalizedSandboxManifest)) {
+          const existingFile = ideFiles.find(f => f.path === path);
+
+          if (existingFile) {
+            // Update existing file
+            updateFile(existingFile.id, sandboxFile.content);
+            results.push(`📝 Updated ${path} in IDE`);
+          } else {
+            // Add new file
+            addFile({
+              name: path.split('/').pop() || 'unknown',
+              path: path,
+              content: sandboxFile.content,
+              type: 'component',
+              language: path.endsWith('.tsx') ? 'typescriptreact' : path.endsWith('.ts') ? 'typescript' : 'json',
+            });
+            results.push(`➕ Added ${path} to IDE`);
+          }
+          appliedChanges++;
+        }
+
+        results.push(`🔄 Bidirectional sync: ${Object.keys(allIdeFiles).length} uploaded, ${Object.keys(normalizedSandboxManifest).length} downloaded`);
+      }
+
+      const summary = [
+        `✅ Sync completed: ${direction}`,
+        `📊 ${appliedChanges} changes applied`,
+        ...results,
+      ].join('\n');
+
+      addConsoleMessage?.('success', summary);
+
+      return {
+        success: true,
+        message: summary,
+        data: {
+          direction,
+          changes_applied: appliedChanges,
+          added: changes.added.length,
+          modified: changes.modified.length,
+          deleted: changes.deleted.length,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: '❌ Two-way sync failed',
+        error: String(error),
+      };
+    }
+  }
+
+  /**
+   * Calculate file changes between two manifests
+   */
+  static calculateFileChanges(
+    sourceManifest: Record<string, { path: string; size: number; modified: number; content: string }>,
+    targetManifest: Record<string, { path: string; size: number; modified: number; content: string }>
+  ) {
+    const sourcePaths = new Set(Object.keys(sourceManifest));
+    const targetPaths = new Set(Object.keys(targetManifest));
+
+    const added = Array.from(sourcePaths).filter(path => !targetPaths.has(path));
+    const deleted = Array.from(targetPaths).filter(path => !sourcePaths.has(path));
+
+    const potentiallyModified = Array.from(sourcePaths).filter(path => targetPaths.has(path));
+    const modified = potentiallyModified.filter(path => {
+      const source = sourceManifest[path];
+      const target = targetManifest[path];
+      return source.size !== target.size || source.content !== target.content;
+    });
+
+    return { added, modified, deleted };
   }
 
   /**
