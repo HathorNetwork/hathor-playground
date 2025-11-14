@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { promisify } from 'util';
+import { gzip } from 'zlib';
+
 import { beamService } from '@/lib/services/beam-service';
+
+const gzipAsync = promisify(gzip);
 
 /**
  * GET /api/beam/sandbox/[projectId]/files
@@ -13,6 +18,8 @@ export async function GET(
     const { projectId } = params;
     const { searchParams } = new URL(req.url);
     const relativePath = searchParams.get('path') || '';
+    const cursor = searchParams.get('cursor');
+    const limit = Math.min(Number(searchParams.get('limit')) || 50, 200);
 
     if (!projectId) {
       return NextResponse.json(
@@ -30,13 +37,49 @@ export async function GET(
 
     console.log(`[API] Reading files from: ${absolutePath}`);
     const files = await beamService.downloadFiles(projectId, absolutePath);
-    console.log(`[API] Found ${Object.keys(files).length} files`);
-    if (Object.keys(files).length > 0) {
-      console.log(`[API] Sample file paths:`, Object.keys(files).slice(0, 10));
-    } else {
-      console.warn(`[API] WARNING: No files found! This might indicate an issue with the find command or file filtering.`);
+    const sorted = files.sort((a, b) => a.path.localeCompare(b.path));
+
+    let startIndex = 0;
+    if (cursor) {
+      const cursorIndex = sorted.findIndex((entry) => entry.path === cursor);
+      startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
     }
-    return NextResponse.json({ files, debug: { path: absolutePath, fileCount: Object.keys(files).length } });
+
+    const pageEntries = sorted.slice(startIndex, startIndex + limit);
+    const responseEntries = pageEntries.map(({ path, content }) => ({
+      path,
+      encoding: 'base64' as const,
+      size: content.length,
+      content: content.toString('base64'),
+    }));
+
+    const nextCursor =
+      startIndex + limit < sorted.length ? sorted[startIndex + limit - 1].path : null;
+
+    const payload = {
+      entries: responseEntries,
+      cursor: nextCursor,
+      hasMore: startIndex + limit < sorted.length,
+      total: sorted.length,
+      returned: responseEntries.length,
+    };
+
+    const acceptEncoding = req.headers.get('accept-encoding') || '';
+    const payloadBuffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+    const shouldGzip = acceptEncoding.includes('gzip') && payloadBuffer.length > 64 * 1024;
+
+    if (shouldGzip) {
+      const gzipped = await gzipAsync(payloadBuffer);
+      return new NextResponse(gzipped, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Encoding': 'gzip',
+        },
+      });
+    }
+
+    return NextResponse.json(payload);
   } catch (error: any) {
     console.error('Failed to read files:', error);
     return NextResponse.json(

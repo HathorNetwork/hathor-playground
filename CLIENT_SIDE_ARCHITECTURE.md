@@ -100,7 +100,7 @@ frontend/
 │   ├── AgenticChatV2.tsx         # New chat component
 │   └── AgenticChatStreaming.tsx  # Old chat component
 ├── lib/
-│   ├── ai-tools-client.ts        # Client-side tool handlers ⭐ NEW
+│   ├── tools/                    # Modular tool handlers (files/blueprints/beam/sync)
 │   ├── pyodide-runner.ts         # Pyodide execution engine
 │   └── api.ts                    # API abstraction
 └── store/
@@ -153,61 +153,14 @@ export async function POST(req: Request) {
 - ✅ Tools defined but not executed here
 - ✅ LLM calls proxied through this route
 
-### 3. Tool Execution (`lib/ai-tools-client.ts`)
+### 3. Tool Execution (`lib/tools/*.ts`)
 
-Tools execute in the browser with full access to Zustand and Pyodide:
+Tools execute in the browser with full access to Zustand, Pyodide, and the BEAM client. The four modules in `lib/tools/` align with that separation of concerns:
 
-```typescript
-export class AIToolsClient {
-  static async writeFile(path: string, content: string): Promise<ToolResult> {
-    const { files, updateFile, addFile } = useIDEStore.getState();
-
-    // Direct Zustand access!
-    const existingFile = files.find(f => f.path === path);
-
-    if (existingFile) {
-      updateFile(existingFile.id, content);
-      return { success: true, message: `✅ Updated ${path}` };
-    } else {
-      addFile({ name, path, content, ... });
-      return { success: true, message: `✅ Created ${path}` };
-    }
-  }
-
-  static async compileBlueprint(path: string): Promise<ToolResult> {
-    const file = useIDEStore.getState().files.find(f => f.path === path);
-
-    // Direct Pyodide access!
-    const result = await pyodideRunner.compileContract(
-      file.content,
-      file.name
-    );
-
-    if (result.success) {
-      // Update store with compiled contract
-      useIDEStore.getState().setCompiledContract(file.id, result.blueprint_id);
-      return { success: true, message: `✅ Compiled ${path}` };
-    }
-
-    return { success: false, error: result.error };
-  }
-
-  static async runTests(testPath: string): Promise<ToolResult> {
-    const testFile = useIDEStore.getState().files.find(f => f.path === testPath);
-
-    // Direct Pyodide access!
-    const result = await pyodideRunner.runTests(testFile.content, testFile.name);
-
-    return {
-      success: result.success,
-      message: result.success
-        ? `✅ Tests passed: ${result.tests_passed}/${result.tests_run}`
-        : `❌ Tests failed`,
-      data: { ...result },
-    };
-  }
-}
-```
+- `files.ts` – list/read/write/delete, dependency graphs, component integration helpers.
+- `blueprints.ts` – Pyodide compilation, execution, testing, and validation.
+- `beam.ts` – BEAM sandbox orchestration, log streaming, file sync entry points, SSE-based `runCommand`.
+- `sync.ts` – manifest hashing/diffing and IDE ↔ sandbox synchronization.
 
 **Key points:**
 - ✅ Direct access to Zustand store

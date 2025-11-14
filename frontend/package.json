@@ -9,6 +9,7 @@
     "build": "npm run compress-modules && next build",
     "start": "next start -H 0.0.0.0",
     "lint": "next lint",
+    "test:sync": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\"}' node --require ts-node/register --require tsconfig-paths/register --test tests/manifest.test.ts",
     "type-check": "tsc --noEmit",
     "compress-modules": "node scripts/compress-hathor-modules.js",
     "download-modules": "node scripts/download-hathor-modules.js $npm_package_hathor_core_reference",
@@ -72,6 +73,8 @@
     "eslint-config-next": "^14.0.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.2"
   },
   "engines": {

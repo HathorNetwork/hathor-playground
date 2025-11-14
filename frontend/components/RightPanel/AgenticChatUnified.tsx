@@ -15,7 +15,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import { Sparkles, Send, Loader2, Trash2, Code2, Globe, Square } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
-import { AIToolsClient } from '@/lib/ai-tools-client';
+import { blueprintTools, fileTools, beamTools, syncDApp } from '@/lib/tools';
 import { Conversation, ConversationContent, ConversationScrollButton, ConversationEmptyState } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
@@ -118,56 +118,56 @@ export const AgenticChatUnified: React.FC = () => {
         switch (toolName) {
           // ========== Shared File Tools ==========
           case 'list_files':
-            result = await AIToolsClient.listFiles(args.path || '/');
+            result = await fileTools.listFiles(args.path || '/');
             break;
 
           case 'read_file':
-            result = await AIToolsClient.readFile(args.path);
+            result = await fileTools.readFile(args.path);
             break;
 
           case 'write_file':
-            result = await AIToolsClient.writeFile(args.path, args.content);
+            result = await fileTools.writeFile(args.path, args.content);
             break;
 
           case 'delete_file':
-            result = await AIToolsClient.deleteFile(args.path);
+            result = await fileTools.deleteFile(args.path);
             break;
 
           case 'get_project_structure':
-            result = await AIToolsClient.getProjectStructure(args.filterByType);
+            result = await fileTools.getProjectStructure(args.filterByType);
             break;
 
           case 'find_file':
-            result = await AIToolsClient.findFile(args.pattern, args.searchPath);
+            result = await fileTools.findFile(args.pattern, args.searchPath);
             break;
 
           case 'get_file_dependencies':
-            result = await AIToolsClient.getFileDependencies(args.filePath);
+            result = await fileTools.getFileDependencies(args.filePath);
             break;
 
           case 'analyze_component':
-            result = await AIToolsClient.analyzeComponent(args.filePath);
+            result = await fileTools.analyzeComponent(args.filePath);
             break;
 
           case 'integrate_component':
-            result = await AIToolsClient.integrateComponent(args.componentPath, args.targetPage);
+            result = await fileTools.integrateComponent(args.componentPath, args.targetPage);
             break;
 
           // ========== Blueprint Tools ==========
           case 'validate_blueprint':
-            result = await AIToolsClient.validateBlueprint(args.path);
+            result = await blueprintTools.validateBlueprint(args.path);
             break;
 
           case 'list_methods':
-            result = await AIToolsClient.listMethods(args.path);
+            result = await blueprintTools.listMethods(args.path);
             break;
 
           case 'compile_blueprint':
-            result = await AIToolsClient.compileBlueprint(args.path);
+            result = await blueprintTools.compileBlueprint(args.path);
             break;
 
           case 'execute_method':
-            result = await AIToolsClient.executeMethod(
+            result = await blueprintTools.executeMethod(
               args.path,
               args.method_name,
               args.args || [],
@@ -179,7 +179,7 @@ export const AgenticChatUnified: React.FC = () => {
             // Validate test_path parameter
             if (!args.test_path) {
               // Try to find available test files to help the AI
-              const files = (await AIToolsClient.listFiles('/tests')).data || [];
+              const files = (await fileTools.listFiles('/tests')).data || [];
               const testFiles = files.filter((f: any) =>
                 f.name.startsWith('test_') && f.name.endsWith('.py')
               );
@@ -194,36 +194,36 @@ export const AgenticChatUnified: React.FC = () => {
                 error: 'test_path parameter is required. Example: run_tests({ test_path: "/tests/test_counter.py" })',
               };
             } else {
-              result = await AIToolsClient.runTests(args.test_path);
+              result = await blueprintTools.runTests(args.test_path);
             }
             break;
 
           // ========== dApp Tools ==========
           case 'bootstrap_nextjs':
-            result = await AIToolsClient.bootstrapNextJS(
+            result = await beamTools.bootstrapNextJS(
               args.useTypeScript ?? true,
               args.useTailwind ?? true
             );
             break;
 
           case 'deploy_dapp':
-            result = await AIToolsClient.deployDApp();
+            result = await beamTools.deployDApp();
             break;
 
           case 'upload_files':
-            result = await AIToolsClient.uploadFiles(args.files || []);
+            result = await beamTools.uploadFiles(args.files || []);
             break;
 
           case 'get_sandbox_url':
-            result = await AIToolsClient.getSandboxUrl();
+            result = await beamTools.getSandboxUrl();
             break;
 
           case 'restart_dev_server':
-            result = await AIToolsClient.restartDevServer();
+            result = await beamTools.restartDevServer();
             break;
 
           case 'create_hathor_dapp':
-            result = await AIToolsClient.createHathorDapp(
+            result = await beamTools.createHathorDapp(
               args.app_name,
               args.wallet_connect_id,
               args.network
@@ -231,20 +231,20 @@ export const AgenticChatUnified: React.FC = () => {
             break;
 
           case 'run_command':
-            result = await AIToolsClient.runCommand(args.command);
+            result = await beamTools.runCommand(args.command);
             break;
 
           case 'read_sandbox_files':
-            result = await AIToolsClient.readSandboxFiles(args.path);
+            result = await beamTools.readSandboxFiles(args.path);
             break;
 
           case 'get_sandbox_logs':
-            result = await AIToolsClient.getSandboxLogs(args.lines || 50);
+            result = await beamTools.getSandboxLogs(args.lines || 50);
             break;
 
           // ========== Two-Way Sync ==========
           case 'sync_dapp':
-            result = await AIToolsClient.syncDApp(args.direction || 'bidirectional');
+            result = await syncDApp(args.direction || 'bidirectional');
             break;
 
           default:

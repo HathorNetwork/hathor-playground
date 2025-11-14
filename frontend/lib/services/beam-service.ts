@@ -445,7 +445,7 @@ export class BeamService {
     // Note: Skipping stale detection for downloadFiles to avoid losing files created by recent commands
     // The sync should run on the same sandbox instance that just executed commands
 
-    const files: Record<string, string> = {};
+    const files: Array<{ path: string; content: Buffer }> = [];
 
     // Find all regular files, excluding common large/unnecessary directories
     const excludePatterns = [
@@ -505,19 +505,24 @@ export class BeamService {
       }
 
       try {
-        const tmpFile = path.join(os.tmpdir(), 'beam-download-' + Date.now() + '-' + path.basename(sandboxFilePath));
+        const tmpFile = path.join(
+          os.tmpdir(),
+          'beam-download-' + Date.now() + '-' + path.basename(sandboxFilePath),
+        );
         await instance.fs.downloadFile(sandboxFilePath, tmpFile);
-        const content = fs.readFileSync(tmpFile, 'utf-8');
+        const content = fs.readFileSync(tmpFile);
         const frontendPath = sandboxFilePath.replace(DEFAULT_CODE_PATH + '/', '/dapp/');
-        files[frontendPath] = content;
-        console.log(`[DOWNLOAD] Successfully downloaded: ${sandboxFilePath} -> ${frontendPath} (${content.length} bytes)`);
+        files.push({ path: frontendPath, content });
+        console.log(
+          `[DOWNLOAD] Successfully downloaded: ${sandboxFilePath} -> ${frontendPath} (${content.length} bytes)`,
+        );
         fs.unlinkSync(tmpFile);
       } catch (error: any) {
         console.warn(`[DOWNLOAD] Failed to download ${sandboxFilePath}:`, error.message);
       }
     }
 
-    console.log(`[DOWNLOAD] Returning ${Object.keys(files).length} files. Keys:`, Object.keys(files).slice(0, 10));
+    console.log(`[DOWNLOAD] Returning ${files.length} files. Keys:`, files.slice(0, 10).map((f) => f.path));
     return files;
   }
 

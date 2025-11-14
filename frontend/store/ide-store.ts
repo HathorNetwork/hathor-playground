@@ -3,7 +3,6 @@ import type { StateCreator } from 'zustand';
 import { Contract } from '@/lib/api';
 import { storage, initStorage, StoredFile, ChatSession, ChatMessage } from '@/lib/storage';
 import { SAMPLE_PROJECTS } from './sample-projects';
-import { beamClient } from '@/lib/beam-client';
 
 export type FileType = 'contract' | 'test' | 'component' | 'hook' | 'style' | 'config';
 export type FileLanguage = 'python' | 'typescript' | 'typescriptreact' | 'css' | 'json';
@@ -76,9 +75,6 @@ interface IDEState {
   isRunningTests: boolean;
   isStorageInitialized: boolean;
 
-  // Git Sync State
-  gitSyncState: Record<string, { lastSyncedCommitHash: string | null; gitInitialized: boolean }>;
-
   // Project actions
   createProject: (name: string, description?: string) => string;
   deleteProject: (id: string) => void;
@@ -122,11 +118,6 @@ interface IDEState {
   deleteFileFromStorage: (id: string) => Promise<void>;
   loadChatSessionsFromStorage: () => Promise<void>;
 
-  // Git sync operations
-  getLastSyncedCommitHash: (projectId: string) => string | null;
-  setLastSyncedCommitHash: (projectId: string, hash: string | null) => void;
-  isGitInitialized: (projectId: string) => boolean;
-  setGitInitialized: (projectId: string, initialized: boolean) => void;
 }
 
 // Helper: Build folder tree from flat file list
@@ -180,36 +171,6 @@ function saveProjectsToLocalStorage(projects: Project[], activeProjectId: string
   }
 }
 
-// Helper: Sync dApp files to Beam
-// Debounced to avoid too many uploads
-let beamSyncTimeout: NodeJS.Timeout | null = null;
-async function syncDAppFilesToBeam(projectId: string, file: File) {
-  // Only sync dapp/ files
-  if (!file.path.startsWith('/dapp/')) {
-    return;
-  }
-
-  console.log('Scheduling Beam sync for file:', file.path);
-
-  // Clear existing timeout
-  if (beamSyncTimeout) {
-    clearTimeout(beamSyncTimeout);
-  }
-
-  // Debounce: wait 1 second before uploading
-  beamSyncTimeout = setTimeout(async () => {
-    try {
-      console.log('Syncing file to Beam:', file.path);
-      await beamClient.uploadFiles(projectId, {
-        [file.path]: file.content
-      });
-      console.log('File synced to Beam successfully');
-    } catch (error) {
-      console.error('Failed to sync file to Beam:', error);
-    }
-  }, 1000);
-}
-
 const createIDEStore: StateCreator<IDEState> = (set, get) => {
   // Initialize with sample projects
   const initialProjects = SAMPLE_PROJECTS;
@@ -238,7 +199,6 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
     isExecuting: false,
     isRunningTests: false,
     isStorageInitialized: false,
-    gitSyncState: {},
 
     // Project actions
     createProject: (name, description) => {
@@ -354,8 +314,6 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
         state.saveFileToStorage(fileWithId).catch(console.error);
       }
 
-      // Sync dApp files to Beam
-      syncDAppFilesToBeam(activeProject.id, fileWithId).catch(console.error);
     },
 
     updateFile: (id, content) => {
@@ -393,8 +351,6 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
           state.saveFileToStorage(fileWithNewContent).catch(console.error);
         }
 
-        // Sync dApp files to Beam
-        syncDAppFilesToBeam(activeProject.id, fileWithNewContent).catch(console.error);
       }
     },
 
@@ -688,18 +644,6 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
 
     loadFilesFromStorage: async () => {
       try {
-        // Load git sync state from localStorage
-        const storedGitSyncStateJson = localStorage.getItem('hathor-git-sync-state');
-        if (storedGitSyncStateJson) {
-          try {
-            const storedGitSyncState = JSON.parse(storedGitSyncStateJson);
-            set({ gitSyncState: storedGitSyncState });
-          } catch (error) {
-            console.warn('Failed to parse git sync state from localStorage:', error);
-          }
-        }
-
-        // Load projects from localStorage
         const storedProjectsJson = localStorage.getItem('hathor-projects');
 
         if (storedProjectsJson) {
@@ -789,62 +733,6 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
       }
     },
 
-    // Git sync operations
-    getLastSyncedCommitHash: (projectId: string) => {
-      const state = get();
-      return state.gitSyncState[projectId]?.lastSyncedCommitHash || null;
-    },
-
-    setLastSyncedCommitHash: (projectId: string, hash: string | null) => {
-      set((state) => {
-        const currentState = state.gitSyncState[projectId] || { lastSyncedCommitHash: null, gitInitialized: false };
-        return {
-          gitSyncState: {
-            ...state.gitSyncState,
-            [projectId]: {
-              ...currentState,
-              lastSyncedCommitHash: hash,
-            },
-          },
-        };
-      });
-
-      // Persist to localStorage
-      try {
-        const state = get();
-        localStorage.setItem('hathor-git-sync-state', JSON.stringify(state.gitSyncState));
-      } catch (error) {
-        console.error('Failed to save git sync state to localStorage:', error);
-      }
-    },
-
-    isGitInitialized: (projectId: string) => {
-      const state = get();
-      return state.gitSyncState[projectId]?.gitInitialized || false;
-    },
-
-    setGitInitialized: (projectId: string, initialized: boolean) => {
-      set((state) => {
-        const currentState = state.gitSyncState[projectId] || { lastSyncedCommitHash: null, gitInitialized: false };
-        return {
-          gitSyncState: {
-            ...state.gitSyncState,
-            [projectId]: {
-              ...currentState,
-              gitInitialized: initialized,
-            },
-          },
-        };
-      });
-
-      // Persist to localStorage
-      try {
-        const state = get();
-        localStorage.setItem('hathor-git-sync-state', JSON.stringify(state.gitSyncState));
-      } catch (error) {
-        console.error('Failed to save git sync state to localStorage:', error);
-      }
-    },
   };
 };
 

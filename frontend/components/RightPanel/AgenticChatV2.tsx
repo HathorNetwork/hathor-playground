@@ -16,7 +16,7 @@ import React, { useRef, useEffect } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { Sparkles, Send, Loader2, Trash2, Wrench, Square } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
-import { AIToolsClient } from '@/lib/ai-tools-client';
+import { blueprintTools, fileTools } from '@/lib/tools';
 import { ChatMessage } from './ChatMessage';
 
 export const AgenticChatV2: React.FC = () => {
@@ -49,40 +49,40 @@ export const AgenticChatV2: React.FC = () => {
         switch (toolCall.toolName) {
           // File management tools
           case 'list_files':
-            result = await AIToolsClient.listFiles(toolCall.args.path);
+            result = await fileTools.listFiles(toolCall.args.path);
             break;
 
           case 'read_file':
-            result = await AIToolsClient.readFile(toolCall.args.path);
+            result = await fileTools.readFile(toolCall.args.path);
             break;
 
           case 'write_file':
-            result = await AIToolsClient.writeFile(
+            result = await fileTools.writeFile(
               toolCall.args.path,
               toolCall.args.content
             );
             break;
 
           case 'get_project_structure':
-            result = await AIToolsClient.getProjectStructure();
+            result = await fileTools.getProjectStructure();
             break;
 
           // Blueprint validation tools
           case 'validate_blueprint':
-            result = await AIToolsClient.validateBlueprint(toolCall.args.path);
+            result = await blueprintTools.validateBlueprint(toolCall.args.path);
             break;
 
           case 'list_methods':
-            result = await AIToolsClient.listMethods(toolCall.args.path);
+            result = await blueprintTools.listMethods(toolCall.args.path);
             break;
 
           // Pyodide execution tools
           case 'compile_blueprint':
-            result = await AIToolsClient.compileBlueprint(toolCall.args.path);
+            result = await blueprintTools.compileBlueprint(toolCall.args.path);
             break;
 
           case 'execute_method':
-            result = await AIToolsClient.executeMethod(
+            result = await blueprintTools.executeMethod(
               toolCall.args.path,
               toolCall.args.method_name,
               toolCall.args.args || [],
@@ -91,7 +91,7 @@ export const AgenticChatV2: React.FC = () => {
             break;
 
           case 'run_tests':
-            result = await AIToolsClient.runTests(toolCall.args.test_path);
+            result = await blueprintTools.runTests(toolCall.args.test_path);
             break;
 
           default:

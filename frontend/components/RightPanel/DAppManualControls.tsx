@@ -16,7 +16,7 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
-import { AIToolsClient } from '@/lib/ai-tools-client';
+import { beamTools, fileTools, syncDApp } from '@/lib/tools';
 
 export const DAppManualControls: React.FC = () => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -33,9 +33,9 @@ export const DAppManualControls: React.FC = () => {
 
     setLoading(true);
     try {
-      const result = await AIToolsClient.deployDApp(activeProjectId);
+      const result = await beamTools.deployDApp();
       if (result.success) {
-        addConsoleMessage('success', `✅ dApp deployed: ${result.url}`);
+        addConsoleMessage('success', `✅ dApp deployed: ${result.data?.url ?? 'sandbox updated'}`);
       } else {
         addConsoleMessage('error', `❌ Deploy failed: ${result.error}`);
       }
@@ -59,11 +59,13 @@ export const DAppManualControls: React.FC = () => {
 
     setLoading(true);
     try {
-      const result = await AIToolsClient.runCommand(activeProjectId, customCommand);
+      const result = await beamTools.runCommand(customCommand);
       if (result.success) {
-        addConsoleMessage('success', `✅ Command executed\n${result.output?.stdout || ''}`);
-        if (result.output?.stderr) {
-          addConsoleMessage('warning', `stderr: ${result.output.stderr}`);
+        const stdout = result.data?.stdout || '';
+        const stderr = result.data?.stderr;
+        addConsoleMessage('success', `✅ Command executed\n${stdout}`);
+        if (stderr) {
+          addConsoleMessage('warning', `stderr: ${stderr}`);
         }
       } else {
         addConsoleMessage('error', `❌ Command failed: ${result.error}`);
@@ -83,7 +85,7 @@ export const DAppManualControls: React.FC = () => {
 
     setLoading(true);
     try {
-      const result = await AIToolsClient.restartDevServer(activeProjectId);
+      const result = await beamTools.restartDevServer();
       if (result.success) {
         addConsoleMessage('success', '✅ Dev server restarted');
       } else {
@@ -104,9 +106,9 @@ export const DAppManualControls: React.FC = () => {
 
     setLoading(true);
     try {
-      const result = await AIToolsClient.getSandboxLogs(activeProjectId, 50);
+      const result = await beamTools.getSandboxLogs(50);
       if (result.success) {
-        addConsoleMessage('info', `📋 Recent logs:\n${result.logs || 'No logs available'}`);
+        addConsoleMessage('info', `📋 Recent logs:\n${result.data?.logs || 'No logs available'}`);
       } else {
         addConsoleMessage('error', `❌ Get logs failed: ${result.error}`);
       }
@@ -125,11 +127,11 @@ export const DAppManualControls: React.FC = () => {
 
     setLoading(true);
     try {
-      const result = await AIToolsClient.getSandboxUrl(activeProjectId);
+      const result = await beamTools.getSandboxUrl();
       if (result.success) {
-        addConsoleMessage('success', `🌐 Sandbox URL: ${result.url}`);
-        // Copy to clipboard
-        navigator.clipboard.writeText(result.url || '');
+        const url = result.data?.url || '';
+        addConsoleMessage('success', `🌐 Sandbox URL: ${url}`);
+        navigator.clipboard.writeText(url);
       } else {
         addConsoleMessage('error', `❌ Get URL failed: ${result.error}`);
       }
@@ -149,9 +151,13 @@ export const DAppManualControls: React.FC = () => {
     setLoading(true);
     try {
       const direction = bidirectional ? 'bidirectional' : 'ide-to-sandbox';
-      const result = await AIToolsClient.syncDApp(direction);
+      const result = await syncDApp(direction);
       if (result.success) {
-        addConsoleMessage('success', `🔄 Sync completed: ${result.changes_applied} changes`);
+        const stats = result.data || {};
+        addConsoleMessage(
+          'success',
+          `🔄 Sync completed: ${stats.uploaded ?? 0} pushed, ${stats.downloaded ?? 0} pulled, ${stats.removed ?? 0} removed`,
+        );
       } else {
         addConsoleMessage('error', `❌ Sync failed: ${result.error}`);
       }
@@ -179,7 +185,7 @@ export const DAppManualControls: React.FC = () => {
 
     setLoading(true);
     try {
-      const result = await AIToolsClient.deleteFile(activeProjectId, deleteTarget);
+      const result = await fileTools.deleteFile(deleteTarget);
       if (result.success) {
         addConsoleMessage('success', `✅ Deleted: ${deleteTarget}`);
         setDeleteTarget('');
@@ -205,18 +211,17 @@ export const DAppManualControls: React.FC = () => {
 
     setLoading(true);
     try {
-      // List all files in /dapp/
-      const listResult = await AIToolsClient.listFiles(activeProjectId, '/dapp/');
+      const listResult = await fileTools.listFiles('/dapp/');
       if (!listResult.success) {
         addConsoleMessage('error', `❌ Failed to list files: ${listResult.error}`);
         return;
       }
 
-      const files = listResult.files || [];
+      const files = (listResult.data as Array<{ path: string }>) || [];
       let deletedCount = 0;
 
       for (const file of files) {
-        const deleteResult = await AIToolsClient.deleteFile(activeProjectId, file);
+        const deleteResult = await fileTools.deleteFile(file.path);
         if (deleteResult.success) {
           deletedCount++;
         }

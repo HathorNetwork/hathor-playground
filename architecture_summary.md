@@ -498,7 +498,7 @@ Left panel shows:
      - Displays tool execution in UI
 
 ### 3. **Client-Side Tool Implementation**
-   - `/frontend/lib/ai-tools-client.ts` (980 lines)
+  - `/frontend/lib/tools/files.ts`, `/frontend/lib/tools/blueprints.ts`, `/frontend/lib/tools/beam.ts`, `/frontend/lib/tools/sync.ts`
      - Implements all tool handlers
      - Three categories:
        - **Shared tools**: File operations via Zustand
@@ -556,16 +556,16 @@ This adds a message to the console before the tool actually executes.
 **Line 102:**
 ```typescript
 case 'run_tests':
-  result = await AIToolsClient.runTests(args.test_path);
+  result = await blueprintTools.runTests(args.test_path);
   break;
 ```
 
-This calls the actual implementation in `AIToolsClient`.
+This calls the actual implementation in the blueprint tools module.
 
 ### Result Display:
 
-**File:** `/frontend/lib/ai-tools-client.ts`  
-**Lines 407-427:**
+**File:** `/frontend/lib/tools/blueprints.ts`  
+**Runtime snippet:**
 ```typescript
 if (result.success) {
   const passRate = result.tests_run
@@ -668,6 +668,7 @@ This architecture achieves **client-side tool execution** with **server-side AI 
 5. **Frontend executes locally** - Tools run in browser (Pyodide, Zustand, BEAM client)
 6. **Frontend sends results** - `addToolResult` sends execution results back to AI
 7. **AI continues reasoning** - With tool results, AI generates final response
+8. **Frontend UI updates** - Files, console, and chat react to tool outputs
 
 The key insight: **The AI doesn't execute tools, it decides what tools to call. The frontend executes them and reports results back.**
 
@@ -677,10 +678,19 @@ The key insight: **The AI doesn't execute tools, it decides what tools to call. 
 
 1. `/frontend/app/api/chat-unified/route.ts` - Tool definitions
 2. `/frontend/components/RightPanel/AgenticChatUnified.tsx` - Tool dispatch
-3. `/frontend/lib/ai-tools-client.ts` - Tool implementations
+3. `/frontend/lib/tools/*.ts` - Tool implementations (files/blueprints/beam/sync modules)
 4. `/frontend/store/ide-store.ts` - State management
 5. `/frontend/lib/pyodide-runner.ts` - Blueprint execution
 6. `/frontend/lib/beam-client.ts` - dApp deployment
 7. `/frontend/components/RightPanel/ChatMessage.tsx` - Message display
 8. `/UNIFIED_ARCHITECTURE.md` - Architecture docs
+
+---
+
+## 9. 2025 Refactor Highlights
+
+- **Modular tools** now live in `frontend/lib/tools/` so file, blueprint, BEAM, and sync behaviors evolve independently.
+- **Manifest-based syncing** replaces in-browser git: each `/dapp` file is hashed, compared against a stored manifest, and only changed files are sent in either direction.
+- **Sandbox file API** (`/api/beam/sandbox/[projectId]/files`) supports pagination, base64 payloads, and gzip compression to handle large/binary assets safely.
+- **SSE command runner** (`/api/beam/sandbox/[projectId]/command/stream`) streams stdout/stderr in real time; `beamTools.runCommand` now surfaces those chunks to the console while still returning aggregated output to the AI.
 

@@ -60,46 +60,14 @@ Browser                                   Next.js API Route        OpenAI/Gemini
 
 ## Key Components
 
-### 1. Unified Tool Client (`lib/ai-tools-client.ts`)
+### 1. Modular Tool Clients (`lib/tools/*.ts`)
 
-All tools execute in the browser:
+- `files.ts` reads/writes from the Zustand store and powers structural introspection tools (dependency graph, component analysis, integration helpers).
+- `blueprints.ts` wraps Pyodide runners for compile/execute/test flows.
+- `beam.ts` orchestrates BEAM sandboxes (deployments, sandbox logs, streaming commands) and exposes the public tool surface.
+- `sync.ts` owns manifest-based IDE ↔ sandbox synchronization and no longer depends on browser-side git.
 
-```typescript
-export class AIToolsClient {
-  // ========== BLUEPRINT TOOLS ==========
-  // Execute in Pyodide (browser WebAssembly)
-  static async compileBlueprint(path: string): Promise<ToolResult> {
-    await pyodideRunner.initialize();
-    const result = await pyodideRunner.compileContract(file.content, file.name);
-    // Updates Zustand store with compiled contract
-  }
-
-  static async runTests(testPath: string): Promise<ToolResult> {
-    await pyodideRunner.initialize();
-    const result = await pyodideRunner.runTests(testFile.content, testFile.name);
-    // Pytest runs in browser, returns results
-  }
-
-  // ========== DAPP TOOLS ==========
-  // Execute via BEAM client (browser → BEAM API)
-  static async deployDApp(): Promise<ToolResult> {
-    const url = await beamClient.deployDApp(activeProjectId, filesMap);
-    // Uploads files to BEAM sandbox, returns URL
-  }
-
-  static async uploadFiles(paths: string[]): Promise<ToolResult> {
-    await beamClient.uploadFiles(activeProjectId, filesMap);
-    // Hot reload specific files in BEAM sandbox
-  }
-
-  // ========== SHARED TOOLS ==========
-  // Execute against Zustand store
-  static async writeFile(path: string, content: string): Promise<ToolResult> {
-    const { files, updateFile, addFile } = useIDEStore.getState();
-    // Direct Zustand manipulation
-  }
-}
-```
+Each module returns plain async functions, and `lib/tools/index.ts` provides grouped exports for React components and AI tools.
 
 ### 2. Unified API Route (`app/api/chat-unified/route.ts`)
 
