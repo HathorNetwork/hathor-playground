@@ -168,31 +168,29 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
       {/* Content */}
       <div className={isFullscreen ? 'flex-1 min-h-0' : 'h-64'}>
-        <div className="overflow-x-auto h-full">
-          {viewMode === 'diff' ? (
-            <div 
-              ref={diffContainerRef}
-              style={{ height: '100%', width: '100%', minWidth: '600px' }}
-            />
-          ) : (
-            <Editor
-              height="100%"
-              language="python"
-              theme="vs-dark"
-              value={modifiedCode}
-              options={{
-                readOnly: true,
-                minimap: { enabled: isFullscreen },
-                fontSize: isFullscreen ? 14 : 12,
-                scrollBeyondLastLine: false,
-                wordWrap: isFullscreen ? 'on' : 'off',
-                lineNumbers: 'on',
-                glyphMargin: true,
-                folding: isFullscreen,
-              }}
-            />
-          )}
-        </div>
+        {viewMode === 'diff' ? (
+          <div 
+            ref={diffContainerRef}
+            style={{ height: '100%', width: '100%' }}
+          />
+        ) : (
+          <Editor
+            height="100%"
+            language="python"
+            theme="vs-dark"
+            value={modifiedCode}
+            options={{
+              readOnly: true,
+              minimap: { enabled: isFullscreen },
+              fontSize: isFullscreen ? 14 : 12,
+              scrollBeyondLastLine: false,
+              wordWrap: isFullscreen ? 'on' : 'off',
+              lineNumbers: 'on',
+              glyphMargin: true,
+              folding: isFullscreen,
+            }}
+          />
+        )}
       </div>
 
       {/* Diff Summary */}

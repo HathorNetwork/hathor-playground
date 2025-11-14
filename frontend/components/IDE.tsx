@@ -6,6 +6,7 @@ import { CodeEditor } from './Editor/CodeEditor';
 import { Console } from './Console/Console';
 import { Toolbar } from './Toolbar/Toolbar';
 import { AIAssistant } from './AI/AIAssistant';
+import { RightPanel } from './RightPanel/RightPanel';
 import { PyodideLoader } from './PyodideLoader';
 import { useIDEStore, File } from '@/store/ide-store';
 import { contractsApi, validationApi } from '@/lib/api';
@@ -17,7 +18,7 @@ import dynamic from 'next/dynamic';
 const EditorTabs = dynamic(() => import('./Editor/EditorTabs').then(mod => mod.EditorTabs), { ssr: false });
 
 export function IDE() {
-  
+
   const [isAICollapsed, setIsAICollapsed] = React.useState(true);
   const [isPyodideReady, setIsPyodideReady] = React.useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = React.useState(false);
@@ -25,6 +26,7 @@ export function IDE() {
   const aiPanelRef = React.useRef<ImperativePanelHandle>(null);
   const codePanelRef = React.useRef<ImperativePanelHandle>(null);
   const leftSidebarPanelRef = React.useRef<ImperativePanelHandle>(null);
+  const editorRef = React.useRef<any>(null); // Store editor instance for direct content access
   
   const {
     files,
@@ -117,23 +119,43 @@ export function IDE() {
     addConsoleMessage('info', `Running tests from ${activeFile.name}...`);
 
     try {
-      const { validateTestBlueprints, combineCodeForTesting } = await import('../utils/testParser');
+      const { validateTestBlueprints } = await import('../utils/testParser');
       const { pyodideRunner } = await import('../lib/pyodide-runner');
-      
-      const contractFiles = files.filter(f => f.type !== 'test');
-      
-      const validation = validateTestBlueprints(activeFile, contractFiles);
-      
+      const { useIDEStore } = await import('../store/ide-store');
+
+      // Get the CURRENT content from the Monaco editor (not from store which might be stale)
+      const currentTestContent = editorRef.current?.getValue() || activeFile.content;
+
+      // Get the LATEST files from the store (not from React props which might be stale)
+      const latestFiles = useIDEStore.getState().files;
+
+      // Also get current content for contract files
+      const contractFiles = latestFiles.filter(f => f.type !== 'test').map(f => {
+        // If this file is currently open in the editor, get its current content
+        if (f.id === activeFileId && editorRef.current) {
+          return { ...f, content: editorRef.current.getValue() };
+        }
+        return f;
+      });
+
+      // Create a test file object with current content for validation
+      const currentTestFile = { ...activeFile, content: currentTestContent };
+
+      const validation = validateTestBlueprints(currentTestFile, contractFiles);
+
       if (!validation.isValid) {
         validation.errors.forEach(error => {
           addConsoleMessage('error', `❌ ${error}`);
         });
         return;
       }
-      
-      const combinedCode = combineCodeForTesting(contractFiles, activeFile, validation.references);
-      
-      const testResult = await pyodideRunner.runTests(combinedCode, activeFile.name);
+
+      // Pass contract files to runner so it can create them in the filesystem
+      const testResult = await pyodideRunner.runTests(
+        currentTestContent,
+        activeFile.name,
+        contractFiles
+      );
       
       // Save test execution logs to store
       if (testResult.output) {
@@ -184,85 +206,157 @@ export function IDE() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-900">
+    <div
+      className="h-screen flex flex-col"
+      style={{ background: 'var(--elegant-darkest)' }}
+    >
       <Toolbar
         fileName={activeFile?.name}
       />
-      
+
       <div className="flex-1 overflow-hidden flex">
-        <div className="w-16 bg-gray-800 flex flex-col items-center py-2 space-y-4">
+        <div
+          className="w-14 flex flex-col items-center py-4 space-y-3 border-r"
+          style={{
+            background: 'var(--elegant-dark)',
+            borderRightColor: 'var(--border-subtle)',
+          }}
+        >
         <button
           onClick={() => handleTabClick('files')}
-          className={clsx('p-2 rounded-lg transition-colors relative group', {
-            'bg-blue-600 text-white': activeTab === 'files' && !isLeftSidebarCollapsed,
-            'text-gray-400 hover:bg-gray-700': activeTab !== 'files' || isLeftSidebarCollapsed,
-          })}
+          className={clsx('p-2.5 rounded-lg transition-all duration-200 relative group')}
+          style={{
+            background: activeTab === 'files' && !isLeftSidebarCollapsed
+              ? 'var(--elegant-medium)'
+              : 'transparent',
+            color: activeTab === 'files' && !isLeftSidebarCollapsed
+              ? 'var(--accent-blue)'
+              : 'var(--text-muted)',
+          }}
+          onMouseEnter={(e) => {
+            if (!(activeTab === 'files' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'var(--elegant-medium)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!(activeTab === 'files' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--text-muted)';
+            }
+          }}
           title="File Explorer"
         >
-          <Files size={24} />
-          <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+          <Files size={20} />
+          <div
+            className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 text-xs px-2.5 py-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none font-medium"
+            style={{
+              background: 'var(--elegant-medium)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
             File Explorer
           </div>
         </button>
         <button
           onClick={() => handleTabClick('run')}
-          className={clsx('p-2 rounded-lg transition-colors relative group', {
-            'bg-blue-600 text-white': activeTab === 'run' && !isLeftSidebarCollapsed,
-            'text-gray-400 hover:bg-gray-700': activeTab !== 'run' || isLeftSidebarCollapsed,
-          })}
+          className={clsx('p-2.5 rounded-lg transition-all duration-200 relative group')}
+          style={{
+            background: activeTab === 'run' && !isLeftSidebarCollapsed
+              ? 'var(--elegant-medium)'
+              : 'transparent',
+            color: activeTab === 'run' && !isLeftSidebarCollapsed
+              ? 'var(--accent-green)'
+              : 'var(--text-muted)',
+          }}
+          onMouseEnter={(e) => {
+            if (!(activeTab === 'run' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'var(--elegant-medium)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!(activeTab === 'run' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--text-muted)';
+            }
+          }}
           title="Deploy & Run"
         >
-          <Play size={24} />
-          <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+          <Play size={20} />
+          <div
+            className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 text-xs px-2.5 py-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none font-medium"
+            style={{
+              background: 'var(--elegant-medium)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
             Deploy & Run
           </div>
         </button>
-        
+
       </div>
         <PanelGroup direction="horizontal">
-          <Panel ref={leftSidebarPanelRef} collapsible={true} defaultSize={20} minSize={5} maxSize={40}>
+          <Panel ref={leftSidebarPanelRef} collapsible={true} defaultSize={30} minSize={5} maxSize={40}>
             <LeftSidebarContent
               activeTab={activeTab}
             />
           </Panel>
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+          <PanelResizeHandle
+            className="w-0.5 transition-colors duration-200"
+            style={{
+              background: 'var(--border-subtle)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--accent-blue)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--border-subtle)';
+            }}
+          />
           <Panel ref={codePanelRef} defaultSize={45}>
             <PanelGroup direction="vertical">
               <Panel defaultSize={70}>
                 <EditorTabs />
-                <CodeEditor />
+                <CodeEditor editorRef={editorRef} />
               </Panel>
-              <PanelResizeHandle className="h-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+              <PanelResizeHandle
+                className="h-0.5 transition-colors duration-200"
+                style={{
+                  background: 'var(--border-subtle)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--accent-purple)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--border-subtle)';
+                }}
+              />
               <Panel defaultSize={30} minSize={15}>
                 <Console onRunTests={handleRunTests} />
               </Panel>
             </PanelGroup>
           </Panel>
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
-          <Panel ref={aiPanelRef} defaultSize={25} minSize={3} maxSize={40}>
-            <AIAssistant
-              isCollapsed={isAICollapsed}
-              onToggleCollapse={() => {
-                const newCollapsed = !isAICollapsed;
-                setIsAICollapsed(newCollapsed);
-                
-                setTimeout(() => {
-                  if (aiPanelRef.current && codePanelRef.current) {
-                    if (newCollapsed) {
-                      aiPanelRef.current.resize(3);
-                      codePanelRef.current.resize(67);
-                    } else {
-                      aiPanelRef.current.resize(25);
-                      codePanelRef.current.resize(45);
-                    }
-                  }
-                }, 10);
-              }}
-            />
+          <PanelResizeHandle
+            className="w-0.5 transition-colors duration-200"
+            style={{
+              background: 'var(--border-subtle)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--accent-blue)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--border-subtle)';
+            }}
+          />
+          <Panel ref={aiPanelRef} defaultSize={30} minSize={20} maxSize={50}>
+            <RightPanel />
           </Panel>
         </PanelGroup>
       </div>
-      
+
       {!isPyodideReady && (
         <PyodideLoader onReady={() => setIsPyodideReady(true)} />
       )}

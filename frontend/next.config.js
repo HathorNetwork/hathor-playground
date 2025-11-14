@@ -5,15 +5,9 @@ const nextConfig = {
   output: 'standalone',
   experimental: {
     appDir: true,
+    instrumentationHook: true, // Enable instrumentation.ts loading
   },
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: 'http://backend:8000/api/:path*', // Proxy to Backend
-      },
-    ];
-  },
+  // Proxy removed - using Next.js API routes directly
   webpack: (config, { isServer }) => {
     // Monaco Editor and Pyodide need these fallbacks
     config.resolve.fallback = {
@@ -24,11 +18,17 @@ const nextConfig = {
       'node:path': false,
       'node:child_process': false,
       'node:crypto': false,
+      'node:events': false,
+      'node:stream': false,
+      'node:util': false,
       child_process: false,
       crypto: false,
+      events: false,
+      stream: false,
+      util: false,
     };
     
-    // For client-side, ignore node modules that cause issues with Pyodide
+    // For client-side, ignore node modules that cause issues with Pyodide and isomorphic-git
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
@@ -36,6 +36,12 @@ const nextConfig = {
         'node:crypto': false,
         'node:fs': false,
         'node:path': false,
+        'node:events': false,
+        'node:stream': false,
+        'node:util': false,
+        events: false,
+        stream: false,
+        util: false,
       };
     }
     

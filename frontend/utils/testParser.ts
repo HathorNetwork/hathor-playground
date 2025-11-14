@@ -159,14 +159,14 @@ ${contractFile.content}
   combinedCode += `
 # Test code from ${testFile.name}
 `;
-  
+
   // Process test file content to replace self references with global references
   let processedTestContent = testFile.content;
-  
+
   // Replace self.nc_catalog with global nc_catalog
   //processedTestContent = processedTestContent.replace(/self\.nc_catalog/g, 'nc_catalog');
-  
+
   combinedCode += processedTestContent;
-  
+
   return combinedCode;
 }

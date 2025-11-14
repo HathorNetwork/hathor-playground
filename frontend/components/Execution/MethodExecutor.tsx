@@ -151,10 +151,35 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
         });
 
         if (!compileResult.success || !compileResult.blueprint_id) {
-          addConsoleMessage('error', 'Deploy failed');
-          compileResult.errors.forEach((error) => {
-            addConsoleMessage('error', error);
-          });
+          addConsoleMessage('error', '❌ Deploy failed');
+          
+          // Display full traceback if available
+          if ((compileResult as any).traceback) {
+            // Save the compile error traceback for the AI
+            setLastExecutionLogs((compileResult as any).traceback);
+            
+            const tracebackLines = (compileResult as any).traceback.split('\n');
+            tracebackLines.forEach((line: string) => {
+              if (line.trim()) {
+                addConsoleMessage('error', line);
+              }
+            });
+          } else if (compileResult.errors && compileResult.errors.length > 0) {
+            // Save errors as execution log
+            setLastExecutionLogs(`Compile errors:\n${compileResult.errors.join('\n')}`);
+            
+            // Fallback to errors array if no traceback
+            compileResult.errors.forEach((error) => {
+              addConsoleMessage('error', error);
+            });
+          } else if ((compileResult as any).error) {
+            // Save single error as execution log (from pyodide-runner)
+            setLastExecutionLogs(`Compile error: ${(compileResult as any).error}`);
+            
+            // Fallback to single error message
+            addConsoleMessage('error', (compileResult as any).error);
+          }
+          
           setIsExecuting(false);
           return;
         }
@@ -274,19 +299,37 @@ export const MethodExecutor: React.FC<MethodExecutorProps> = ({ }) => {
         const errorMessage = result.error || 'Unknown error occurred';
         addConsoleMessage('error', `❌ Method execution failed:`);
 
-        if (errorMessage.includes('AttributeError')) {
-          addConsoleMessage('error', `  → ${errorMessage}`);
-          if (errorMessage.includes('cannot set a container field')) {
-            addConsoleMessage('warning', '  💡 Hint: Container fields (dict, list, set) are auto-initialized. Remove assignments like self.balances = {}');
-          } else if (errorMessage.includes("'Context' object has no attribute 'address'")) {
-            addConsoleMessage('warning', '  💡 Hint: Use ctx.vertex.hash instead of ctx.address for caller identity');
-          }
-        } else if (errorMessage.includes('ValueError')) {
-          addConsoleMessage('error', `  → ${errorMessage}`);
-        } else if (errorMessage.includes('TypeError')) {
-          addConsoleMessage('error', `  → ${errorMessage}`);
+        // Display full traceback if available
+        if ((result as any).traceback) {
+          // Save the traceback as execution logs for the AI
+          setLastExecutionLogs((result as any).traceback);
+          
+          // Split traceback into lines and display each line
+          const tracebackLines = (result as any).traceback.split('\n');
+          tracebackLines.forEach((line: string) => {
+            if (line.trim()) {
+              addConsoleMessage('error', line);
+            }
+          });
         } else {
-          addConsoleMessage('error', `  → ${errorMessage}`);
+          // Save simple error as execution log
+          setLastExecutionLogs(`Error: ${errorMessage}`);
+          
+          // Fallback to simple error message
+          if (errorMessage.includes('AttributeError')) {
+            addConsoleMessage('error', `  → ${errorMessage}`);
+            if (errorMessage.includes('cannot set a container field')) {
+              addConsoleMessage('warning', '  💡 Hint: Container fields (dict, list, set) are auto-initialized. Remove assignments like self.balances = {}');
+            } else if (errorMessage.includes("'Context' object has no attribute 'address'")) {
+              addConsoleMessage('warning', '  💡 Hint: Use ctx.vertex.hash instead of ctx.address for caller identity');
+            }
+          } else if (errorMessage.includes('ValueError')) {
+            addConsoleMessage('error', `  → ${errorMessage}`);
+          } else if (errorMessage.includes('TypeError')) {
+            addConsoleMessage('error', `  → ${errorMessage}`);
+          } else {
+            addConsoleMessage('error', `  → ${errorMessage}`);
+          }
         }
       }
     } catch (error: any) {

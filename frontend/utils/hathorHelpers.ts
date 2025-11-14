@@ -45,7 +45,7 @@ def _convert_frontend_args(args_json, kwargs_json):
     kwargs = json.loads(kwargs_json) if kwargs_json else {}
 
     parsed_args = [parse_arg(arg) for arg in args]
-    parsed_kwargs = {k: parse_args(v) for k, v in kwargs.items()}
+    parsed_kwargs = {k: parse_arg(v) for k, v in kwargs.items()}
     print(f"Converted args from frontend: {parsed_args}")
     print(f"Converted kwargs from frontend: {parsed_kwargs}")
 
@@ -129,29 +129,6 @@ def _create_context(
         block_data=block_data,
         actions=Context.__group_actions__(actions or ()),  # Group provided or empty actions
     )
-
-def _monkeyPatchNodeTrieStore():
-    import hathor.nanocontracts.storage.backends
-    from hathor.nanocontracts.storage.patricia_trie import Node
-    NodeTrieStore = hathor.nanocontracts.storage.backends.NodeTrieStore
-
-    class MockMemoryNodeTrieStore(NodeTrieStore):
-        def __init__(self) -> None:
-            self._db: dict[bytes, Node] = {}
-
-        def __getitem__(self, key: bytes) -> Node:
-            return self._db[key]
-
-        def __setitem__(self, key: bytes, item: Node) -> None:
-            self._db[key] = item
-
-        def __len__(self) -> int:
-            return len(self._db)
-
-        def __contains__(self, key: bytes) -> bool:
-            return key in self._db
-
-    hathor.nanocontracts.storage.backends.MemoryNodeTrieStore = MockMemoryNodeTrieStore
 `;
 
 export const getHathorHelpers = () => HATHOR_HELPERS;

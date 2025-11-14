@@ -10,6 +10,13 @@ pydantic>=2.0.0
 # LLM API dependencies
 openai>=1.3.8
 
+# Beam Cloud SDK for sandbox deployment (imports as 'beam')
+beta9>=0.1.207
+beam-client>=0.2.165
+
+# Rate limiting
+slowapi>=0.1.9
+
 # Testing dependencies
 pytest>=7.4.3
 pytest-asyncio>=0.21.1
