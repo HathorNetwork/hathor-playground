@@ -206,40 +206,97 @@ export function IDE() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-900">
+    <div
+      className="h-screen flex flex-col"
+      style={{ background: 'var(--elegant-darkest)' }}
+    >
       <Toolbar
         fileName={activeFile?.name}
       />
-      
+
       <div className="flex-1 overflow-hidden flex">
-        <div className="w-16 bg-gray-800 flex flex-col items-center py-2 space-y-4">
+        <div
+          className="w-14 flex flex-col items-center py-4 space-y-3 border-r"
+          style={{
+            background: 'var(--elegant-dark)',
+            borderRightColor: 'var(--border-subtle)',
+          }}
+        >
         <button
           onClick={() => handleTabClick('files')}
-          className={clsx('p-2 rounded-lg transition-colors relative group', {
-            'bg-blue-600 text-white': activeTab === 'files' && !isLeftSidebarCollapsed,
-            'text-gray-400 hover:bg-gray-700': activeTab !== 'files' || isLeftSidebarCollapsed,
-          })}
+          className={clsx('p-2.5 rounded-lg transition-all duration-200 relative group')}
+          style={{
+            background: activeTab === 'files' && !isLeftSidebarCollapsed
+              ? 'var(--elegant-medium)'
+              : 'transparent',
+            color: activeTab === 'files' && !isLeftSidebarCollapsed
+              ? 'var(--accent-blue)'
+              : 'var(--text-muted)',
+          }}
+          onMouseEnter={(e) => {
+            if (!(activeTab === 'files' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'var(--elegant-medium)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!(activeTab === 'files' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--text-muted)';
+            }
+          }}
           title="File Explorer"
         >
-          <Files size={24} />
-          <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+          <Files size={20} />
+          <div
+            className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 text-xs px-2.5 py-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none font-medium"
+            style={{
+              background: 'var(--elegant-medium)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
             File Explorer
           </div>
         </button>
         <button
           onClick={() => handleTabClick('run')}
-          className={clsx('p-2 rounded-lg transition-colors relative group', {
-            'bg-blue-600 text-white': activeTab === 'run' && !isLeftSidebarCollapsed,
-            'text-gray-400 hover:bg-gray-700': activeTab !== 'run' || isLeftSidebarCollapsed,
-          })}
+          className={clsx('p-2.5 rounded-lg transition-all duration-200 relative group')}
+          style={{
+            background: activeTab === 'run' && !isLeftSidebarCollapsed
+              ? 'var(--elegant-medium)'
+              : 'transparent',
+            color: activeTab === 'run' && !isLeftSidebarCollapsed
+              ? 'var(--accent-green)'
+              : 'var(--text-muted)',
+          }}
+          onMouseEnter={(e) => {
+            if (!(activeTab === 'run' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'var(--elegant-medium)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!(activeTab === 'run' && !isLeftSidebarCollapsed)) {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--text-muted)';
+            }
+          }}
           title="Deploy & Run"
         >
-          <Play size={24} />
-          <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+          <Play size={20} />
+          <div
+            className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 text-xs px-2.5 py-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none font-medium"
+            style={{
+              background: 'var(--elegant-medium)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
             Deploy & Run
           </div>
         </button>
-        
+
       </div>
         <PanelGroup direction="horizontal">
           <Panel ref={leftSidebarPanelRef} collapsible={true} defaultSize={30} minSize={5} maxSize={40}>
@@ -247,26 +304,59 @@ export function IDE() {
               activeTab={activeTab}
             />
           </Panel>
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+          <PanelResizeHandle
+            className="w-0.5 transition-colors duration-200"
+            style={{
+              background: 'var(--border-subtle)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--accent-blue)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--border-subtle)';
+            }}
+          />
           <Panel ref={codePanelRef} defaultSize={45}>
             <PanelGroup direction="vertical">
               <Panel defaultSize={70}>
                 <EditorTabs />
                 <CodeEditor editorRef={editorRef} />
               </Panel>
-              <PanelResizeHandle className="h-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+              <PanelResizeHandle
+                className="h-0.5 transition-colors duration-200"
+                style={{
+                  background: 'var(--border-subtle)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--accent-purple)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--border-subtle)';
+                }}
+              />
               <Panel defaultSize={30} minSize={15}>
                 <Console onRunTests={handleRunTests} />
               </Panel>
             </PanelGroup>
           </Panel>
-          <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
+          <PanelResizeHandle
+            className="w-0.5 transition-colors duration-200"
+            style={{
+              background: 'var(--border-subtle)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--accent-blue)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--border-subtle)';
+            }}
+          />
           <Panel ref={aiPanelRef} defaultSize={30} minSize={20} maxSize={50}>
             <RightPanel />
           </Panel>
         </PanelGroup>
       </div>
-      
+
       {!isPyodideReady && (
         <PyodideLoader onReady={() => setIsPyodideReady(true)} />
       )}
