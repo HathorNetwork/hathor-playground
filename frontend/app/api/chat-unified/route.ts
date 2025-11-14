@@ -270,7 +270,7 @@ export async function POST(req: Request) {
         }),
 
         bootstrap_nextjs: tool({
-          description: 'Create a new Next.js project scaffold with TypeScript and Tailwind',
+          description: '⚠️ DEPRECATED: DO NOT USE for Hathor dApps! Use run_command with "npx create-hathor-dapp" instead. This creates a plain Next.js scaffold WITHOUT wallet integration, RPC support, or Hathor contexts.',
           parameters: z.object({
             use_typescript: z.boolean().optional().describe('Use TypeScript (default: true)'),
             use_tailwind: z.boolean().optional().describe('Use Tailwind CSS (default: true)'),
@@ -284,6 +284,16 @@ export async function POST(req: Request) {
           }),
         }),
 
+      // Convenience tool to ensure correct scaffolding for Hathor dApps
+      create_hathor_dapp: tool({
+        description: 'Scaffold a new Hathor dApp in the BEAM sandbox using the official create-hathor-dapp template. This will generate a Next.js dApp with Hathor wallet integration and scaffolding.',
+        parameters: z.object({
+          app_name: z.string().optional().describe('Directory name for the app (default: "hathor-dapp")'),
+          wallet_connect_id: z.string().optional().describe('WalletConnect Project ID for Hathor wallet (defaults to recommended test project)'),
+          network: z.enum(['mainnet', 'testnet']).optional().describe('Hathor network (default: "testnet")'),
+        }),
+      }),
+
         read_sandbox_files: tool({
           description: 'Read files from BEAM sandbox back to IDE (two-way sync). Use after running commands that generate files.',
           parameters: z.object({
@@ -295,6 +305,15 @@ export async function POST(req: Request) {
           description: 'Get recent logs from the sandbox dev server for debugging',
           parameters: z.object({
             lines: z.number().optional().describe('Number of log lines to retrieve (default: 50)'),
+          }),
+        }),
+
+        // ========== Two-Way Sync Tools ==========
+
+        sync_dapp: tool({
+          description: 'Two-way sync between IDE and BEAM sandbox. Handles additions, modifications, and deletions in both directions.',
+          parameters: z.object({
+            direction: z.enum(['ide-to-sandbox', 'sandbox-to-ide', 'bidirectional']).optional().describe('Sync direction (default: bidirectional)'),
           }),
         }),
       },

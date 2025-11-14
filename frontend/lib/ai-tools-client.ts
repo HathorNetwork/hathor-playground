@@ -13,6 +13,7 @@
 import { pyodideRunner } from './pyodide-runner';
 import { beamClient } from './beam-client';
 import { useIDEStore } from '@/store/ide-store';
+import { GitService } from './git-service';
 import type { File } from '@/store/ide-store';
 
 export interface ToolResult {
@@ -707,12 +708,40 @@ export class AIToolsClient {
 
       addConsoleMessage?.('info', `🚀 Scaffolding Hathor dApp: ${resolvedAppName} (${resolvedNetwork})`);
 
-      // Clean up any existing directory first
-      const cleanupCmd = `rm -rf ${resolvedAppName}`;
-      await AIToolsClient.runCommand(cleanupCmd);
+      // Clean up any existing directory first - use more forceful approach
+      // First check if directory exists, then remove it with multiple fallback strategies
+      const checkDirCmd = `cd /app && test -d ${resolvedAppName} && echo "exists" || echo "not_exists"`;
+      const checkResult = await AIToolsClient.runCommand(checkDirCmd);
+      
+      if (checkResult.data?.stdout?.includes('exists')) {
+        addConsoleMessage?.('info', `🧹 Cleaning up existing ${resolvedAppName} directory...`);
+        
+        // Try multiple cleanup strategies
+        const cleanupCommands = [
+          `cd /app && rm -rf ${resolvedAppName}`,
+          `cd /app && chmod -R u+w ${resolvedAppName} 2>/dev/null; rm -rf ${resolvedAppName}`,
+          `cd /app && find ${resolvedAppName} -delete 2>/dev/null; rm -rf ${resolvedAppName}`,
+        ];
+        
+        let cleanupSuccess = false;
+        for (const cleanupCmd of cleanupCommands) {
+          const cleanupResult = await AIToolsClient.runCommand(cleanupCmd);
+          // Check if directory still exists
+          const verifyCmd = `cd /app && test -d ${resolvedAppName} && echo "exists" || echo "not_exists"`;
+          const verifyResult = await AIToolsClient.runCommand(verifyCmd);
+          if (verifyResult.data?.stdout?.includes('not_exists')) {
+            cleanupSuccess = true;
+            break;
+          }
+        }
+        
+        if (!cleanupSuccess) {
+          addConsoleMessage?.('warning', `⚠️ Could not fully remove ${resolvedAppName}, but continuing...`);
+        }
+      }
 
-      // Execute scaffold command in sandbox
-      const cmd = `npx create-hathor-dapp@latest ${resolvedAppName} --yes --wallet-connect-id=${resolvedWC} --network=${resolvedNetwork}`;
+      // Execute scaffold command in sandbox (skip git init - we'll manage git ourselves)
+      const cmd = `cd /app && npx create-hathor-dapp@latest ${resolvedAppName} --yes --wallet-connect-id=${resolvedWC} --network=${resolvedNetwork} --skip-git`;
       const execResult = await AIToolsClient.runCommand(cmd);
 
       console.log('create-hathor-dapp result:', {
@@ -743,9 +772,9 @@ export class AIToolsClient {
       }
 
       // Check if dApp directory was actually created successfully
-      const checkCmd = `ls -la ${resolvedAppName}/package.json 2>/dev/null || echo "missing"`;
-      const checkResult = await AIToolsClient.runCommand(checkCmd);
-      const packageExists = checkResult.data?.stdout && !checkResult.data?.stdout.includes('missing');
+      const checkPackageCmd = `cd /app && ls -la ${resolvedAppName}/package.json 2>/dev/null || echo "missing"`;
+      const checkPackageResult = await AIToolsClient.runCommand(checkPackageCmd);
+      const packageExists = checkPackageResult.data?.stdout && !checkPackageResult.data?.stdout.includes('missing');
 
       if (!packageExists) {
         return {
@@ -1267,7 +1296,7 @@ export default config;`,
   }
 
   /**
-   * Two-way sync between IDE and BEAM sandbox
+   * Git-based sync between IDE and BEAM sandbox
    */
   static async syncDApp(
     direction: 'ide-to-sandbox' | 'sandbox-to-ide' | 'bidirectional' = 'bidirectional',
@@ -1276,7 +1305,17 @@ export default config;`,
     try {
       // Get project ID from parameter or store (for API route vs tool calls)
       const activeProjectId = projectId || useIDEStore.getState().activeProjectId;
-      const { files: ideFiles, addFile, updateFile, deleteFile, addConsoleMessage } = useIDEStore.getState();
+      const {
+        files: ideFiles,
+        addFile,
+        updateFile,
+        deleteFile,
+        addConsoleMessage,
+        getLastSyncedCommitHash,
+        setLastSyncedCommitHash,
+        isGitInitialized,
+        setGitInitialized,
+      } = useIDEStore.getState();
 
       if (!activeProjectId) {
         return {
@@ -1286,180 +1325,410 @@ export default config;`,
         };
       }
 
-      addConsoleMessage?.('info', `🔄 Starting ${direction} sync for dApp files...`);
+      addConsoleMessage?.('info', `🔄 Starting git-based ${direction} sync...`);
 
-      // Get IDE file manifest (only /dapp/ files)
-      const ideManifest = ideFiles
-        .filter(f => f.path.startsWith('/dapp/'))
-        .reduce((acc, file) => {
-          acc[file.path] = {
-            path: file.path,
-            size: file.content.length,
-            modified: Date.now(), // IDE doesn't track modified time
-            content: file.content,
-          };
-          return acc;
-        }, {} as Record<string, { path: string; size: number; modified: number; content: string }>);
+      // Get only /dapp/ files
+      const dappFiles = ideFiles.filter((f) => f.path.startsWith('/dapp/'));
 
-      let normalizedSandboxManifest: Record<string, { path: string; size: number; modified: number; content: string }> = {};
+      // Step 1: Ensure git is initialized in both locations
+      const ideGitInitialized = await GitService.isInitialized(activeProjectId);
+      if (!ideGitInitialized) {
+        addConsoleMessage?.('info', '📦 Initializing git repository in IDE...');
+        await GitService.initRepo(activeProjectId);
+        setGitInitialized(activeProjectId, true);
+      }
 
-      // Only read sandbox files for directions that need comparison
-      if (direction === 'sandbox-to-ide' || direction === 'bidirectional') {
-        // Get sandbox file manifest
-        try {
+      // Helper function to call git API
+      const callGitAPI = async (operation: string, args: any = {}) => {
+        const response = await fetch(`/api/beam/sandbox/${activeProjectId}/git`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operation, ...args }),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Git operation failed');
+        }
+        return response.json();
+      };
+
+      try {
+        await callGitAPI('ensureGitRepo');
+      } catch (error) {
+        addConsoleMessage?.('error', `⚠️ Failed to ensure git in sandbox: ${error}`);
+        // Continue anyway, might be first sync
+      }
+
+      // Step 2: Get last synced commit hash
+      const lastSyncedHash = getLastSyncedCommitHash(activeProjectId);
+      console.log(`[SYNC] Last synced hash: ${lastSyncedHash || 'null (first sync)'}`);
+
+      // Step 3: Handle first sync differently (no last synced hash)
+      let sandboxHeadHash: string | null = null;
+      
+      if (!lastSyncedHash) {
+        console.log(`[SYNC] ========== FIRST SYNC PATH ==========`);
+        addConsoleMessage?.('info', '🆕 First sync detected, establishing baseline...');
+
+        // Commit current IDE state as baseline
+        if (dappFiles.length > 0) {
+          await GitService.commit(activeProjectId, 'Initial IDE state', dappFiles);
+        }
+
+        // Sync files first, then commit to establish baseline
+        if (direction === 'ide-to-sandbox' || direction === 'bidirectional') {
+          // Push IDE files to sandbox
+          const ideFilesToUpload: Record<string, string> = {};
+          for (const file of dappFiles) {
+            const sandboxPath = file.path.replace('/dapp/', '/app/');
+            ideFilesToUpload[sandboxPath] = file.content;
+          }
+          if (Object.keys(ideFilesToUpload).length > 0) {
+            await beamClient.uploadFiles(activeProjectId, ideFilesToUpload, false);
+            // Commit the uploaded files to establish baseline
+            const commitResult = await callGitAPI('commitSandboxState', { message: 'Initial sync from IDE' });
+            sandboxHeadHash = commitResult.commitHash || null;
+          }
+        }
+
+        if (direction === 'sandbox-to-ide' || direction === 'bidirectional') {
+          // Pull sandbox files to IDE
+          addConsoleMessage?.('info', '📥 Fetching files from sandbox...');
+          
+          // First, verify files exist in sandbox by checking for common dApp files
+          try {
+            const testCmd = `cd /app && find . -name "package.json" -o -name "*.tsx" -o -name "*.ts" | head -5`;
+            const testResult = await AIToolsClient.runCommand(testCmd);
+            console.log(`[SYNC] Test find command result:`, testResult.data?.stdout);
+            addConsoleMessage?.('info', `🔍 Checking for files: ${testResult.data?.stdout || 'no output'}`);
+          } catch (error) {
+            console.warn('[SYNC] Test command failed:', error);
+          }
+          
+          console.log(`[SYNC] Fetching files from sandbox API: /api/beam/sandbox/${activeProjectId}/files`);
           const sandboxResponse = await fetch(`/api/beam/sandbox/${activeProjectId}/files`);
+          console.log(`[SYNC] Sandbox response status: ${sandboxResponse.status}`);
+          
           if (sandboxResponse.ok) {
-            const sandboxData = await sandboxResponse.json();
-            const sandboxManifest = sandboxData.files || {};
+            let sandboxData;
+            try {
+              sandboxData = await sandboxResponse.json();
+            } catch (parseError) {
+              console.error(`[SYNC] Failed to parse JSON response:`, parseError);
+              const textResponse = await sandboxResponse.text();
+              console.error(`[SYNC] Raw response text:`, textResponse.slice(0, 500));
+              throw new Error('Failed to parse API response');
+            }
+            
+            console.log(`[SYNC] Raw API response:`, {
+              hasFiles: !!sandboxData.files,
+              filesKeys: sandboxData.files ? Object.keys(sandboxData.files) : [],
+              filesCount: sandboxData.files ? Object.keys(sandboxData.files).length : 0,
+              sampleKeys: sandboxData.files ? Object.keys(sandboxData.files).slice(0, 5) : [],
+              debug: sandboxData.debug,
+            });
+            const sandboxFiles = sandboxData.files || {};
+            
+            console.log(`[SYNC] Sandbox files keys (first 20):`, Object.keys(sandboxFiles).slice(0, 20));
+            console.log(`[SYNC] Total files in response: ${Object.keys(sandboxFiles).length}`);
+            addConsoleMessage?.('info', `📦 Found ${Object.keys(sandboxFiles).length} files in sandbox`);
+            
+            if (Object.keys(sandboxFiles).length === 0) {
+              console.warn(`[SYNC] WARNING: API returned success but no files! Debug info:`, sandboxData.debug);
+              addConsoleMessage?.('warning', '⚠️ API returned no files - check server logs for details');
+              console.log(`[SYNC] ========== EXITING: NO FILES ==========`);
+            } else {
+              console.log(`[SYNC] ========== PROCESSING ${Object.keys(sandboxFiles).length} FILES ==========`);
+              console.log(`[SYNC] Processing ${Object.keys(sandboxFiles).length} files from sandbox`);
+              let filesAdded = 0;
+              let filesUpdated = 0;
 
-            // Convert sandbox files to consistent format (sandbox paths to IDE paths)
-            for (const [sandboxPath, content] of Object.entries(sandboxManifest)) {
-              // Convert sandbox path to IDE path
-              let idePath = sandboxPath;
-              if (sandboxPath.startsWith('/app/')) {
-                idePath = sandboxPath.replace('/app/', '/dapp/');
+              for (const [sandboxPath, content] of Object.entries(sandboxFiles)) {
+                try {
+                  // downloadFiles already returns paths with /dapp/ prefix, so use as-is
+                  const idePath = sandboxPath.startsWith('/dapp/') ? sandboxPath : sandboxPath.replace('/app/', '/dapp/');
+                  
+                  // Ensure content is a string
+                  const fileContent = typeof content === 'string' ? content : String(content);
+                  
+                  // Get current file list and methods fresh from store (may have changed during iteration)
+                  const storeState = useIDEStore.getState();
+                  const currentFiles = storeState.files;
+                  const existingFile = currentFiles.find((f) => f.path === idePath);
+
+                  // Ensure we have the methods
+                  if (!storeState.updateFile || !storeState.addFile) {
+                    throw new Error('Store methods not available');
+                  }
+
+                  if (existingFile) {
+                    console.log(`[SYNC] Updating existing file: ${idePath}`);
+                    storeState.updateFile(existingFile.id, fileContent);
+                    filesUpdated++;
+                  } else {
+                    console.log(`[SYNC] Adding new file: ${idePath} (${fileContent.length} bytes)`);
+                    storeState.addFile({
+                      name: idePath.split('/').pop() || 'unknown',
+                      path: idePath,
+                      content: fileContent,
+                      type: 'component',
+                      language: idePath.endsWith('.tsx')
+                        ? 'typescriptreact'
+                        : idePath.endsWith('.ts')
+                          ? 'typescript'
+                          : idePath.endsWith('.json')
+                            ? 'json'
+                            : idePath.endsWith('.css')
+                              ? 'css'
+                              : idePath.endsWith('.md')
+                                ? 'markdown'
+                                : idePath.endsWith('.yaml') || idePath.endsWith('.yml')
+                                  ? 'yaml'
+                                  : 'typescript',
+                    });
+                    filesAdded++;
+                  }
+                } catch (error: any) {
+                  console.error(`[SYNC] Error processing file ${sandboxPath}:`, error);
+                  console.error(`[SYNC] Error stack:`, error.stack);
+                  addConsoleMessage?.('error', `❌ Failed to process ${sandboxPath}: ${error.message}`);
+                }
               }
 
-              normalizedSandboxManifest[idePath] = {
-                path: idePath,
-                size: (content as string).length,
-                modified: Date.now(), // Sandbox doesn't track modified time
-                content: content as string,
-              };
+              console.log(`[SYNC] ========== FILE PROCESSING COMPLETE ==========`);
+              console.log(`[SYNC] Files added: ${filesAdded}, Files updated: ${filesUpdated}`);
+              addConsoleMessage?.('info', `✅ Synced ${filesAdded} new files, ${filesUpdated} updated files to IDE`);
+              
+              if (filesAdded === 0 && filesUpdated === 0) {
+                console.error(`[SYNC] ERROR: Processed ${Object.keys(sandboxFiles).length} files but added/updated 0!`);
+                console.error(`[SYNC] This suggests files are being skipped or errors are being swallowed`);
+              }
+
+              // Commit updated IDE state
+              const updatedFiles = useIDEStore.getState().files.filter((f) => f.path.startsWith('/dapp/'));
+              if (updatedFiles.length > 0) {
+                try {
+                  await GitService.commit(activeProjectId, 'Initial sync from sandbox', updatedFiles);
+                } catch (error) {
+                  console.warn('Failed to commit IDE state:', error);
+                }
+              }
+
+              // Try to commit sandbox state and get hash
+              try {
+                const commitResult = await callGitAPI('commitSandboxState', { message: 'Initial sync baseline' });
+                sandboxHeadHash = commitResult.commitHash || null;
+                if (!sandboxHeadHash) {
+                  const headResult = await callGitAPI('getSandboxHeadCommit');
+                  sandboxHeadHash = headResult.commitHash || null;
+                }
+              } catch (error) {
+                console.warn('Failed to commit sandbox state:', error);
+              }
             }
           } else {
-            console.warn('Failed to read sandbox files, continuing with empty manifest');
+            const errorText = await sandboxResponse.text();
+            console.error(`[SYNC] Failed to fetch sandbox files: ${sandboxResponse.status} - ${errorText}`);
+            addConsoleMessage?.('error', `❌ Failed to fetch sandbox files: ${sandboxResponse.statusText}`);
           }
-        } catch (error) {
-          console.warn('Error reading sandbox files:', error);
+        }
+
+        // Establish baseline commit hash after first sync
+        if (!sandboxHeadHash) {
+          // If still no hash, create an empty commit to establish baseline
+          try {
+            const commitResult = await callGitAPI('commitSandboxState', { message: 'Initial baseline' });
+            sandboxHeadHash = commitResult.commitHash || null;
+          } catch (error) {
+            console.warn('Failed to create baseline commit:', error);
+          }
+        }
+
+        // Count synced files
+        const finalFiles = useIDEStore.getState().files.filter((f) => f.path.startsWith('/dapp/'));
+        const filesSynced = finalFiles.length - dappFiles.length;
+
+        if (sandboxHeadHash && sandboxHeadHash !== 'HEAD' && sandboxHeadHash.length >= 7) {
+          setLastSyncedCommitHash(activeProjectId, sandboxHeadHash);
+          addConsoleMessage?.('info', `✅ Baseline established: ${sandboxHeadHash.substring(0, 7)}`);
+        } else {
+          addConsoleMessage?.('warning', '⚠️ Could not establish baseline commit hash');
+        }
+
+        const syncMessage = filesSynced > 0
+          ? `✅ First sync completed: ${filesSynced} files synced, baseline established`
+          : '✅ First sync completed, baseline established';
+
+        return {
+          success: true,
+          message: syncMessage,
+          data: { firstSync: true, baselineHash: sandboxHeadHash, filesSynced },
+        };
+      }
+
+      // Step 4: For non-first sync, commit current state in sandbox (if there are changes)
+      addConsoleMessage?.('info', '📝 Committing current sandbox state...');
+      try {
+        const commitResult = await callGitAPI('commitSandboxState', { message: 'Sync checkpoint' });
+        sandboxHeadHash = commitResult.commitHash || null;
+      } catch (error) {
+        console.warn('Failed to commit sandbox state:', error);
+        // Try to get HEAD anyway
+        try {
+          const headResult = await callGitAPI('getSandboxHeadCommit');
+          sandboxHeadHash = headResult.commitHash || null;
+        } catch {
+          sandboxHeadHash = null;
         }
       }
 
-      // Calculate differences (only for directions that need it)
-      const changes = direction === 'ide-to-sandbox'
-        ? { added: [], modified: [], deleted: [] } // Not needed for ide-to-sandbox
-        : AIToolsClient.calculateFileChanges(ideManifest, normalizedSandboxManifest);
+      // Step 5: Compare commit hashes to detect changes
+      const sandboxHasChanges = sandboxHeadHash && sandboxHeadHash !== lastSyncedHash;
+      const ideHasChanges = await GitService.hasUncommittedChanges(activeProjectId, dappFiles);
 
-      console.log('🔍 Sync analysis:', {
-        direction,
-        ideFiles: Object.keys(ideManifest),
-        sandboxFiles: Object.keys(normalizedSandboxManifest),
-        changes
-      });
-
-      let appliedChanges = 0;
+      // Step 6: Get changed files using git
       const results: string[] = [];
+      let appliedChanges = 0;
+      const conflicts: string[] = [];
 
-      // Apply changes based on direction
-      if (direction === 'ide-to-sandbox') {
-        // For ide-to-sandbox, upload all IDE files without needing to compare with sandbox
-        const allIdeFiles: Record<string, string> = {};
-        for (const [path, file] of Object.entries(ideManifest)) {
-          allIdeFiles[path] = file.content;
-        }
+      if (sandboxHasChanges && (direction === 'sandbox-to-ide' || direction === 'bidirectional')) {
+        // Pull changes from sandbox
+        addConsoleMessage?.('info', '📥 Pulling changes from sandbox...');
 
-        if (Object.keys(allIdeFiles).length > 0) {
-          try {
-            await beamClient.uploadFiles(activeProjectId, allIdeFiles, false);
-            results.push(`📤 Uploaded ${Object.keys(allIdeFiles).length} files to sandbox`);
-            appliedChanges += Object.keys(allIdeFiles).length;
-          } catch (uploadError) {
-            console.warn('Upload failed, trying to ensure sandbox exists:', uploadError);
-            // Try to ensure sandbox exists and retry
-            try {
-              await beamClient.ensureSandbox(activeProjectId);
-              await beamClient.uploadFiles(activeProjectId, allIdeFiles, false);
-              results.push(`📤 Uploaded ${Object.keys(allIdeFiles).length} files to sandbox (after ensuring sandbox)`);
-              appliedChanges += Object.keys(allIdeFiles).length;
-            } catch (retryError) {
-              console.error('Upload failed even after ensuring sandbox:', retryError);
-              results.push(`❌ Failed to upload files to sandbox`);
+        const changedFilesResult = await callGitAPI('getSandboxChangedFiles', { sinceHash: lastSyncedHash });
+        const sandboxChangedFiles = changedFilesResult.changedFiles || [];
+        const sandboxResponse = await fetch(`/api/beam/sandbox/${activeProjectId}/files`);
+        const sandboxData = sandboxResponse.ok ? await sandboxResponse.json() : { files: {} };
+        const sandboxFiles = sandboxData.files || {};
+
+        for (const changedFile of sandboxChangedFiles) {
+          const idePath = `/dapp/${changedFile.path}`;
+          const sandboxPath = `/app/${changedFile.path}`;
+          const sandboxContent = sandboxFiles[sandboxPath] as string | undefined;
+
+          if (changedFile.status === 'deleted') {
+            const fileToDelete = ideFiles.find((f) => f.path === idePath);
+            if (fileToDelete) {
+              deleteFile(fileToDelete.id);
+              results.push(`🗑️ Deleted ${idePath}`);
+              appliedChanges++;
             }
-          }
-        } else {
-          results.push(`📤 No files to upload`);
-        }
-      } else if (direction === 'sandbox-to-ide') {
-        // Add/update files from sandbox to IDE
-        for (const path of changes.modified.concat(changes.added)) {
-          if (normalizedSandboxManifest[path]) {
-            const sandboxFile = normalizedSandboxManifest[path];
-            const existingFile = ideFiles.find(f => f.path === path);
+          } else if (sandboxContent !== undefined) {
+            const existingFile = ideFiles.find((f) => f.path === idePath);
+
+            // Conflict detection: check if IDE also modified this file
+            if (existingFile && ideHasChanges) {
+              const ideChangedFiles = await GitService.getChangedFiles(activeProjectId, lastSyncedHash);
+              const ideFileChanged = ideChangedFiles.some((f) => f.path === idePath && f.status !== 'deleted');
+
+              if (ideFileChanged) {
+                conflicts.push(idePath);
+                results.push(`⚠️ Conflict detected: ${idePath} (IDE version kept)`);
+                // IDE wins by default
+                continue;
+              }
+            }
 
             if (existingFile) {
-              updateFile(existingFile.id, sandboxFile.content);
+              updateFile(existingFile.id, sandboxContent);
+              results.push(`📝 Updated ${idePath}`);
             } else {
               addFile({
-                name: path.split('/').pop() || 'unknown',
-                path: path,
-                content: sandboxFile.content,
+                name: idePath.split('/').pop() || 'unknown',
+                path: idePath,
+                content: sandboxContent,
                 type: 'component',
-                language: path.endsWith('.tsx') ? 'typescriptreact' : path.endsWith('.ts') ? 'typescript' : 'json',
+                language: idePath.endsWith('.tsx')
+                  ? 'typescriptreact'
+                  : idePath.endsWith('.ts')
+                    ? 'typescript'
+                    : 'json',
               });
+              results.push(`➕ Added ${idePath}`);
             }
-          }
-        }
-
-        // Delete files from IDE that were deleted in sandbox
-        for (const deletedPath of changes.deleted) {
-          const fileToDelete = ideFiles.find(f => f.path === deletedPath);
-          if (fileToDelete) {
-            deleteFile(fileToDelete.id);
-            results.push(`🗑️ Deleted ${deletedPath} from IDE`);
             appliedChanges++;
           }
         }
 
-        const addedCount = changes.added.length;
-        const modifiedCount = changes.modified.length;
-        if (addedCount + modifiedCount > 0) {
-          results.push(`📥 Synced ${addedCount + modifiedCount} files from sandbox to IDE`);
-          appliedChanges += addedCount + modifiedCount;
+        // Commit pulled changes in IDE
+        const updatedFiles = useIDEStore.getState().files.filter((f) => f.path.startsWith('/dapp/'));
+        if (updatedFiles.length > 0 && sandboxChangedFiles.length > 0) {
+          const commitLogResult = await callGitAPI('getSandboxCommitLog', { sinceHash: lastSyncedHash });
+          const commitMessages = commitLogResult.commitLog || [];
+          const messages = commitMessages.map((c: { message: string }) => c.message).join(', ');
+          await GitService.commit(activeProjectId, `Synced from sandbox: ${messages}`, updatedFiles);
         }
-      } else if (direction === 'bidirectional') {
-        // For bidirectional, merge all files without deletions to avoid conflicts
-        // Upload all IDE files to sandbox
-        const allIdeFiles: Record<string, string> = {};
-        for (const [path, file] of Object.entries(ideManifest)) {
-          allIdeFiles[path] = file.content;
+      }
+
+      if ((ideHasChanges || direction === 'ide-to-sandbox') && (direction === 'ide-to-sandbox' || direction === 'bidirectional')) {
+        // Push changes to sandbox
+        addConsoleMessage?.('info', '📤 Pushing changes to sandbox...');
+
+        // Commit IDE changes first
+        if (ideHasChanges) {
+          await GitService.commit(activeProjectId, 'IDE changes before sync', dappFiles);
         }
 
-        if (Object.keys(allIdeFiles).length > 0) {
-          await beamClient.uploadFiles(activeProjectId, allIdeFiles, false);
-          results.push(`📤 Uploaded ${Object.keys(allIdeFiles).length} files to sandbox`);
-          appliedChanges += Object.keys(allIdeFiles).length;
-        }
+        // Get changed files (added/deleted - modified detection is simplified)
+        const ideChangedFiles = await GitService.getChangedFiles(activeProjectId, lastSyncedHash);
+        const ideFilesToUpload: Record<string, string> = {};
 
-        // Download all sandbox files to IDE
-        for (const [path, sandboxFile] of Object.entries(normalizedSandboxManifest)) {
-          const existingFile = ideFiles.find(f => f.path === path);
-
-          if (existingFile) {
-            // Update existing file
-            updateFile(existingFile.id, sandboxFile.content);
-            results.push(`📝 Updated ${path} in IDE`);
-          } else {
-            // Add new file
-            addFile({
-              name: path.split('/').pop() || 'unknown',
-              path: path,
-              content: sandboxFile.content,
-              type: 'component',
-              language: path.endsWith('.tsx') ? 'typescriptreact' : path.endsWith('.ts') ? 'typescript' : 'json',
-            });
-            results.push(`➕ Added ${path} to IDE`);
+        // For ide-to-sandbox direction, always upload all files to ensure sync
+        // For bidirectional, upload files that were added or potentially modified
+        if (direction === 'ide-to-sandbox') {
+          // Upload all IDE files
+          for (const file of dappFiles) {
+            const sandboxPath = file.path.replace('/dapp/', '/app/');
+            ideFilesToUpload[sandboxPath] = file.content;
           }
-          appliedChanges++;
+        } else {
+          // Bidirectional: upload added files and all files (since we can't reliably detect modified)
+          // This is a bit inefficient but ensures sync works correctly
+          for (const changedFile of ideChangedFiles) {
+            if (changedFile.status === 'deleted') {
+              // Handle deletions - we'll need to delete from sandbox
+              results.push(`🗑️ Marked for deletion: ${changedFile.path}`);
+            } else if (changedFile.status === 'added') {
+              const file = dappFiles.find((f) => f.path === changedFile.path);
+              if (file) {
+                const sandboxPath = changedFile.path.replace('/dapp/', '/app/');
+                ideFilesToUpload[sandboxPath] = file.content;
+              }
+            }
+          }
+          
+          // Also upload all files to ensure modified files are synced
+          // (Since we can't reliably detect modified files, we sync everything)
+          for (const file of dappFiles) {
+            const sandboxPath = file.path.replace('/dapp/', '/app/');
+            if (!ideFilesToUpload[sandboxPath]) {
+              ideFilesToUpload[sandboxPath] = file.content;
+            }
+          }
         }
 
-        results.push(`🔄 Bidirectional sync: ${Object.keys(allIdeFiles).length} uploaded, ${Object.keys(normalizedSandboxManifest).length} downloaded`);
+        if (Object.keys(ideFilesToUpload).length > 0) {
+          await beamClient.uploadFiles(activeProjectId, ideFilesToUpload, false);
+          const commitResult = await callGitAPI('commitSandboxState', { message: 'Synced from IDE' });
+          sandboxHeadHash = commitResult.commitHash || null;
+          results.push(`📤 Uploaded ${Object.keys(ideFilesToUpload).length} files to sandbox`);
+          appliedChanges += Object.keys(ideFilesToUpload).length;
+        }
+      }
+
+      // Step 7: Update last synced commit hash
+      if (sandboxHeadHash) {
+        setLastSyncedCommitHash(activeProjectId, sandboxHeadHash);
       }
 
       const summary = [
-        `✅ Sync completed: ${direction}`,
+        `✅ Git-based sync completed: ${direction}`,
         `📊 ${appliedChanges} changes applied`,
+        conflicts.length > 0 ? `⚠️ ${conflicts.length} conflicts detected (IDE version kept)` : '',
         ...results,
-      ].join('\n');
+      ]
+        .filter((line) => line)
+        .join('\n');
 
       addConsoleMessage?.('success', summary);
 
@@ -1469,15 +1738,14 @@ export default config;`,
         data: {
           direction,
           changes_applied: appliedChanges,
-          added: changes.added.length,
-          modified: changes.modified.length,
-          deleted: changes.deleted.length,
+          conflicts: conflicts.length,
+          sandboxHeadHash,
         },
       };
     } catch (error) {
       return {
         success: false,
-        message: '❌ Two-way sync failed',
+        message: '❌ Git-based sync failed',
         error: String(error),
       };
     }

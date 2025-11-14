@@ -13,19 +13,20 @@
 import React, { useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
-import { Sparkles, Send, Loader2, Trash2, Code2, Globe } from 'lucide-react';
+import { Sparkles, Send, Loader2, Trash2, Code2, Globe, Square } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 import { AIToolsClient } from '@/lib/ai-tools-client';
 import { Conversation, ConversationContent, ConversationScrollButton, ConversationEmptyState } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { DAppManualControls } from './DAppManualControls';
 
 export const AgenticChatUnified: React.FC = () => {
   const { activeProjectId, addConsoleMessage } = useIDEStore();
 
   // Track tool calling rounds to prevent infinite loops
   const toolRoundCounterRef = useRef(0);
-  const MAX_TOOL_ROUNDS = 10; // Limit to prevent infinite loops
+  const MAX_TOOL_ROUNDS = 50; // Limit to prevent infinite loops
 
   // Track failed tool calls to prevent infinite retries
   // Map format: "toolName:argsHash" -> failure count
@@ -46,7 +47,7 @@ export const AgenticChatUnified: React.FC = () => {
     return `${toolName}:${argsString}`;
   };
 
-  const { messages, setMessages, sendMessage, addToolResult, status } = useChat({
+  const { messages, setMessages, sendMessage, addToolResult, status, stop } = useChat({
     sendAutomaticallyWhen: (opts) => {
       // Check if we've exceeded max rounds
       if (toolRoundCounterRef.current >= MAX_TOOL_ROUNDS) {
@@ -205,6 +206,14 @@ export const AgenticChatUnified: React.FC = () => {
             result = await AIToolsClient.restartDevServer();
             break;
 
+          case 'create_hathor_dapp':
+            result = await AIToolsClient.createHathorDapp(
+              args.app_name,
+              args.wallet_connect_id,
+              args.network
+            );
+            break;
+
           case 'run_command':
             result = await AIToolsClient.runCommand(args.command);
             break;
@@ -215,6 +224,11 @@ export const AgenticChatUnified: React.FC = () => {
 
           case 'get_sandbox_logs':
             result = await AIToolsClient.getSandboxLogs(args.lines || 50);
+            break;
+
+          // ========== Two-Way Sync ==========
+          case 'sync_dapp':
+            result = await AIToolsClient.syncDApp(args.direction || 'bidirectional');
             break;
 
           default:
@@ -286,6 +300,12 @@ export const AgenticChatUnified: React.FC = () => {
 
   const isLoading = status === 'awaiting-message' || status === 'in-progress';
 
+  const handleStop = () => {
+    console.log('🛑 Stopping AI generation...');
+    stop();
+    addConsoleMessage('info', '🛑 AI generation stopped by user');
+  };
+
   const handleClearChat = () => {
     setMessages([]);
     setLocalInput('');
@@ -356,6 +376,9 @@ export const AgenticChatUnified: React.FC = () => {
           <Trash2 className="w-4 h-4 text-gray-400" />
         </button>
       </div>
+
+      {/* dApp Manual Controls */}
+      <DAppManualControls />
 
       {/* Messages - Using AI Elements with Timeline */}
       <Conversation>
@@ -487,17 +510,25 @@ export const AgenticChatUnified: React.FC = () => {
                 }
               }}
             />
-            <button
-              type="submit"
-              disabled={!localInput.trim() || isLoading}
-              className="px-6 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
-            >
-              {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
+            {isLoading ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                title="Stop AI generation"
+              >
+                <Square className="w-5 h-5" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!localInput.trim()}
+                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
+              >
                 <Send className="w-5 h-5" />
-              )}
-            </button>
+              </button>
+            )}
           </div>
         </form>
       </div>

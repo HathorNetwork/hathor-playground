@@ -14,7 +14,7 @@
 
 import React, { useRef, useEffect } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { Sparkles, Send, Loader2, Trash2, Wrench } from 'lucide-react';
+import { Sparkles, Send, Loader2, Trash2, Wrench, Square } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 import { AIToolsClient } from '@/lib/ai-tools-client';
 import { ChatMessage } from './ChatMessage';
@@ -33,6 +33,7 @@ export const AgenticChatV2: React.FC = () => {
     isLoading,
     setMessages,
     addToolResult,
+    stop,
   } = useChat({
     api: '/api/chat-v2', // New API route with client-side tools
 
@@ -127,6 +128,12 @@ export const AgenticChatV2: React.FC = () => {
       addConsoleMessage('success', '✅ Response complete');
     },
   });
+
+  const handleStop = () => {
+    console.log('🛑 Stopping AI generation...');
+    stop();
+    addConsoleMessage('info', '🛑 AI generation stopped by user');
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -285,17 +292,25 @@ export const AgenticChatV2: React.FC = () => {
               }
             }}
           />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim() || !activeProjectId}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={handleStop}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+              title="Stop AI generation"
+            >
+              <Square className="w-5 h-5" />
+              Stop
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim() || !activeProjectId}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
               <Send className="w-5 h-5" />
-            )}
-          </button>
+            </button>
+          )}
         </div>
 
         {!activeProjectId && (

@@ -132,6 +132,8 @@ export class BeamService {
       commands: [
         'apt-get update && apt-get install -y git curl',
         'npm install -g pnpm',
+        'mkdir -p /app',
+        'chmod 755 /app',
       ],
     });
 
@@ -284,19 +286,71 @@ export class BeamService {
   }
 
   async startDevServer(projectId: string): Promise<{ status: string; url: string }> {
-    const instance = await this.getSandbox(projectId);
-    if (!instance) throw new Error('No sandbox found for project ' + projectId);
+    console.log('[START_DEV] =================== startDevServer called for:', projectId);
+    let instance = await this.getSandbox(projectId);
 
+    if (!instance) {
+      console.log('No existing sandbox, creating new one for:', projectId);
+      await this.createSandbox(projectId);
+      // After creating, get directly from Map without TTL check
+      instance = this.sandboxes.get(projectId);
+      // Give newly created sandbox time to be fully ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    if (!instance) {
+      throw new Error('Could not get or create sandbox for project ' + projectId);
+    }
+
+    console.log('Testing if sandbox is alive for dev server:', projectId);
+
+    // Test if sandbox is still alive by doing a quick operation
+    try {
+      await instance.fs.statFile('/');
+    } catch (testError) {
+      console.warn('Cached sandbox is dead/stale, recreating for dev server:', projectId);
+      // Remove stale instance
+      this.sandboxes.delete(projectId);
+      this.urls.delete(projectId);
+      this.processes.delete(projectId);
+      // Create fresh sandbox
+      await this.createSandbox(projectId);
+      instance = this.sandboxes.get(projectId);
+      if (!instance) {
+        throw new Error('Failed to recreate sandbox for project ' + projectId);
+      }
+      // Give new sandbox time to be ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // Determine project root: prefer /app, otherwise first subdir with package.json (e.g., /app/hathor-dapp)
+    let projectRoot = DEFAULT_CODE_PATH;
     try {
       await instance.fs.statFile(DEFAULT_CODE_PATH + '/package.json');
-      const installCmd = 'cd ' + DEFAULT_CODE_PATH + ' && pnpm install';
+      projectRoot = DEFAULT_CODE_PATH;
+    } catch {
+      // Find first package.json within depth 2
+      const findProc = await instance.exec('sh', '-c', `find ${DEFAULT_CODE_PATH} -maxdepth 2 -name package.json | head -n 1 | xargs dirname`);
+      await findProc.wait();
+      const detected = (await findProc.stdout.read())?.trim();
+      if (detected) {
+        projectRoot = detected;
+        console.log('Detected project root at', projectRoot);
+      } else {
+        console.log('No package.json found under /app; dev server may fail to start');
+      }
+    }
+
+    // Install deps and start dev server (projectRoot should exist since /app is created during setup)
+    try {
+      const installCmd = `cd ${projectRoot} && pnpm install`;
       const installProc = await instance.exec('sh', '-c', installCmd);
       await installProc.wait();
     } catch {
-      console.log('No package.json, skipping install');
+      console.log('Dependency install skipped/failed (no package.json yet?)');
     }
 
-    const devCmd = 'cd ' + DEFAULT_CODE_PATH + ' && npx next dev --port ' + DEFAULT_PORT;
+    const devCmd = `cd ${projectRoot} && npx next dev --port ${DEFAULT_PORT}`;
     const process = await instance.exec('sh', '-c', devCmd);
     this.processes.set(projectId, process);
 
@@ -307,38 +361,148 @@ export class BeamService {
   }
 
   async runCommand(projectId: string, command: string) {
-    const instance = await this.getSandbox(projectId);
-    if (!instance) throw new Error('No sandbox found for project ' + projectId);
+    console.log('[RUN_COMMAND] =================== runCommand called for:', projectId);
+    let instance = await this.getSandbox(projectId);
+
+    if (!instance) {
+      console.log('No existing sandbox, creating new one for:', projectId);
+      await this.createSandbox(projectId);
+      // After creating, get directly from Map without TTL check
+      instance = this.sandboxes.get(projectId);
+      // Give newly created sandbox time to be fully ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    if (!instance) {
+      throw new Error('Could not get or create sandbox for project ' + projectId);
+    }
+
+    console.log('Testing if sandbox is alive for command:', projectId);
+
+    // Test if sandbox is still alive by doing a quick operation
+    try {
+      await instance.fs.statFile('/');
+    } catch (testError) {
+      console.warn('Cached sandbox is dead/stale, recreating for command:', projectId);
+      // Remove stale instance
+      this.sandboxes.delete(projectId);
+      this.urls.delete(projectId);
+      this.processes.delete(projectId);
+      // Create fresh sandbox
+      await this.createSandbox(projectId);
+      instance = this.sandboxes.get(projectId);
+      if (!instance) {
+        throw new Error('Failed to recreate sandbox for project ' + projectId);
+      }
+      // Give new sandbox time to be ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
     try {
-      const fullCommand = 'cd ' + DEFAULT_CODE_PATH + ' && ' + command;
+      // Ensure /app exists (for backward compatibility with existing sandboxes)
+      try {
+        await instance.fs.statFile(DEFAULT_CODE_PATH);
+      } catch {
+        console.log('Creating missing /app directory for existing sandbox');
+        await instance.exec('mkdir', '-p', DEFAULT_CODE_PATH);
+      }
+
+      // Now cd to /app and run the command
+      const fullCommand = `cd ${DEFAULT_CODE_PATH} && ${command}`;
+      console.log('Executing command:', fullCommand);
       const process = await instance.exec('sh', '-c', fullCommand);
-      await process.wait();
+      const result = await process.wait();
 
       const stdout = await process.stdout.read();
       const stderr = await process.stderr.read();
 
-      return { stdout: stdout || '', stderr: stderr || '', exit_code: '0', command };
+      const exitCode = result.exitCode?.toString() || '0';
+      console.log('Command result - exit code:', exitCode, 'stdout:', stdout?.slice(0, 200), 'stderr:', stderr?.slice(0, 200));
+      return { stdout: stdout || '', stderr: stderr || '', exit_code: exitCode, command };
     } catch (error: any) {
+      console.error('Command execution error:', error);
       return { stdout: '', stderr: error.message || String(error), exit_code: '1', command };
     }
   }
 
   async downloadFiles(projectId: string, remotePath: string = DEFAULT_CODE_PATH) {
-    const instance = await this.getSandbox(projectId);
-    if (!instance) throw new Error('No sandbox found for project ' + projectId);
+    console.log('[DOWNLOAD] =================== downloadFiles called for:', projectId);
+    let instance = await this.getSandbox(projectId);
+
+    if (!instance) {
+      console.log('No existing sandbox, creating new one for:', projectId);
+      await this.createSandbox(projectId);
+      // After creating, get directly from Map without TTL check
+      instance = this.sandboxes.get(projectId);
+      // Give newly created sandbox time to be fully ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    if (!instance) {
+      throw new Error('Could not get or create sandbox for project ' + projectId);
+    }
+
+    // Note: Skipping stale detection for downloadFiles to avoid losing files created by recent commands
+    // The sync should run on the same sandbox instance that just executed commands
 
     const files: Record<string, string> = {};
-    const findCmd = 'find ' + remotePath + ' -type f';
+
+    // Find all regular files, excluding common large/unnecessary directories
+    const excludePatterns = [
+      'node_modules',
+      '.git',
+      '.next',
+      '.cache',
+      '.npm',
+      '.yarn',
+      'dist',
+      'build',
+    ];
+
+    // Build find command - find all files, exclude common build/dependency directories
+    // Use a simpler approach: find all files first, then filter in JavaScript
+    const findCmd = `find ${remotePath} -type f 2>/dev/null`;
+    console.log(`[DOWNLOAD] Executing find command: ${findCmd}`);
     const process = await instance.exec('sh', '-c', findCmd);
     await process.wait();
     const output = await process.stdout.read();
+    const stderr = await process.stderr.read();
 
-    const filePaths = output.split('\n').filter((line: string) => line.trim());
+    console.log(`[DOWNLOAD] Find command stdout (first 1000 chars): ${output?.slice(0, 1000)}`);
+    if (stderr && stderr.trim()) {
+      console.log(`[DOWNLOAD] Find command stderr: ${stderr}`);
+    }
+
+    // Filter out excluded directories and files
+    const allPaths = output.split('\n').filter((line: string) => line.trim());
+    const filePaths = allPaths.filter((path: string) => {
+      // Exclude common build/dependency directories
+      if (path.includes('/node_modules/') ||
+          path.includes('/.git/') ||
+          path.includes('/.next/') ||
+          path.includes('/.cache/') ||
+          path.includes('/.npm/') ||
+          path.includes('/.yarn/') ||
+          path.includes('/dist/') ||
+          path.includes('/build/') ||
+          path.includes('.DS_Store') ||
+          (path.endsWith('.log') && path.includes('/logs/'))) {
+        return false;
+      }
+      return true;
+    });
+    
+    console.log(`[DOWNLOAD] Found ${allPaths.length} total paths, ${filePaths.length} after filtering`);
+    console.log(`[DOWNLOAD] Sample file paths:`, filePaths.slice(0, 10));
 
     for (const sandboxFilePath of filePaths) {
       if (!sandboxFilePath.trim()) continue;
-      if (sandboxFilePath.includes('node_modules') || sandboxFilePath.includes('/.next/')) continue;
+
+      // Additional filtering for edge cases and files not in directories
+      if (sandboxFilePath.includes('.DS_Store') ||
+          sandboxFilePath.includes('.log') && sandboxFilePath.includes('/logs/')) {
+        continue;
+      }
 
       try {
         const tmpFile = path.join(os.tmpdir(), 'beam-download-' + Date.now() + '-' + path.basename(sandboxFilePath));
@@ -346,12 +510,14 @@ export class BeamService {
         const content = fs.readFileSync(tmpFile, 'utf-8');
         const frontendPath = sandboxFilePath.replace(DEFAULT_CODE_PATH + '/', '/dapp/');
         files[frontendPath] = content;
+        console.log(`[DOWNLOAD] Successfully downloaded: ${sandboxFilePath} -> ${frontendPath} (${content.length} bytes)`);
         fs.unlinkSync(tmpFile);
-      } catch (error) {
-        console.warn('Failed to download:', sandboxFilePath);
+      } catch (error: any) {
+        console.warn(`[DOWNLOAD] Failed to download ${sandboxFilePath}:`, error.message);
       }
     }
 
+    console.log(`[DOWNLOAD] Returning ${Object.keys(files).length} files. Keys:`, Object.keys(files).slice(0, 10));
     return files;
   }
 
@@ -423,6 +589,213 @@ export class BeamService {
    */
   getBuildLogs(projectId: string): string[] {
     return this.buildLogs.get(projectId) || [];
+  }
+
+  /**
+   * Ensure git repository exists in sandbox, initialize if needed
+   */
+  async ensureGitRepo(projectId: string): Promise<void> {
+    let instance = await this.getSandbox(projectId);
+    if (!instance) {
+      await this.createSandbox(projectId);
+      instance = this.sandboxes.get(projectId);
+      if (!instance) {
+        throw new Error('Failed to create sandbox for git operations');
+      }
+    }
+
+    // Check if .git exists
+    try {
+      await instance.fs.statFile(`${DEFAULT_CODE_PATH}/.git`);
+      // Git repo exists
+      return;
+    } catch {
+      // Git repo doesn't exist, initialize it
+      const initResult = await this.runCommand(projectId, 'git init');
+      if (initResult.exit_code !== '0') {
+        throw new Error(`Failed to initialize git repo: ${initResult.stderr}`);
+      }
+
+      // Configure git user (required for commits)
+      await this.runCommand(projectId, 'git config user.name "Sandbox User"');
+      await this.runCommand(projectId, 'git config user.email "sandbox@hathor.local"');
+    }
+  }
+
+  /**
+   * Commit current sandbox state
+   */
+  async commitSandboxState(projectId: string, message: string = 'Sync checkpoint'): Promise<string> {
+    await this.ensureGitRepo(projectId);
+
+    // Add all files (including in subdirectories)
+    const addResult = await this.runCommand(projectId, 'git add -A');
+    if (addResult.exit_code !== '0' && !addResult.stderr.includes('nothing to commit')) {
+      console.warn('git add failed:', addResult.stderr);
+    }
+
+    // Check if there are changes to commit
+    const statusResult = await this.runCommand(projectId, 'git status --porcelain');
+    const hasChanges = statusResult.stdout.trim().length > 0;
+    
+    if (!hasChanges) {
+      // No changes, return current HEAD if it exists
+      const headResult = await this.getSandboxHeadCommit(projectId);
+      return headResult || '';
+    }
+
+    // Create commit
+    const commitResult = await this.runCommand(
+      projectId,
+      `git commit -m "${message.replace(/"/g, '\\"')}"`
+    );
+
+    if (commitResult.exit_code !== '0') {
+      // Check if it's because there's nothing to commit (empty repo with no files)
+      if (commitResult.stderr.includes('nothing to commit') || 
+          commitResult.stderr.includes('no changes') ||
+          commitResult.stderr.includes('nothing added to commit')) {
+        // Try to get existing HEAD, or return empty string if no commits exist
+        const headHash = await this.getSandboxHeadCommit(projectId);
+        return headHash || '';
+      }
+      // Log the error but don't throw - we want to continue even if commit fails
+      console.warn(`Failed to commit sandbox state: ${commitResult.stderr}`);
+      // Try to get existing HEAD anyway
+      const headHash = await this.getSandboxHeadCommit(projectId);
+      return headHash || '';
+    }
+
+    // Get the new commit hash
+    const headHash = await this.getSandboxHeadCommit(projectId);
+    return headHash || '';
+  }
+
+  /**
+   * Get sandbox HEAD commit hash
+   */
+  async getSandboxHeadCommit(projectId: string): Promise<string | null> {
+    try {
+      await this.ensureGitRepo(projectId);
+      
+      // First check if there are any commits
+      const logResult = await this.runCommand(projectId, 'git log --oneline -n 1');
+      // Check both exit code and stderr for "no commits" messages
+      if (logResult.exit_code !== '0' || 
+          !logResult.stdout.trim() || 
+          logResult.stderr.includes('does not have any commits') ||
+          logResult.stderr.includes('fatal: your current branch')) {
+        // No commits yet
+        return null;
+      }
+      
+      // Get the actual commit hash
+      const result = await this.runCommand(projectId, 'git rev-parse HEAD');
+      if (result.exit_code === '0' && result.stdout.trim()) {
+        const hash = result.stdout.trim();
+        // Make sure it's not the literal "HEAD" string and is a valid hash
+        if (hash === 'HEAD' || hash.length < 7 || result.stderr.includes('unknown revision')) {
+          return null;
+        }
+        return hash;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get list of changed files since a specific commit hash
+   */
+  async getSandboxChangedFiles(projectId: string, sinceHash: string | null): Promise<Array<{ path: string; status: 'added' | 'modified' | 'deleted' }>> {
+    try {
+      await this.ensureGitRepo(projectId);
+
+      if (!sinceHash) {
+        // All files are new
+        const listResult = await this.runCommand(projectId, 'git ls-files');
+        const files = listResult.stdout.split('\n').filter((f: string) => f.trim());
+        return files.map((path: string) => ({
+          path: path.replace(/^\.\//, ''), // Remove leading ./
+          status: 'added' as const,
+        }));
+      }
+
+      // Get diff between sinceHash and HEAD
+      const diffResult = await this.runCommand(
+        projectId,
+        `git diff --name-status ${sinceHash}..HEAD`
+      );
+
+      if (diffResult.exit_code !== '0') {
+        console.warn('git diff failed:', diffResult.stderr);
+        return [];
+      }
+
+      const changedFiles: Array<{ path: string; status: 'added' | 'modified' | 'deleted' }> = [];
+      const lines = diffResult.stdout.split('\n').filter((l: string) => l.trim());
+
+      for (const line of lines) {
+        const match = line.match(/^([AMD])\s+(.+)$/);
+        if (match) {
+          const [, statusCode, path] = match;
+          let status: 'added' | 'modified' | 'deleted';
+          if (statusCode === 'A') {
+            status = 'added';
+          } else if (statusCode === 'M') {
+            status = 'modified';
+          } else {
+            status = 'deleted';
+          }
+          changedFiles.push({ path, status });
+        }
+      }
+
+      return changedFiles;
+    } catch (error) {
+      console.error('Error getting sandbox changed files:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get commit log since a specific hash
+   */
+  async getSandboxCommitLog(projectId: string, sinceHash: string | null): Promise<Array<{ hash: string; message: string }>> {
+    try {
+      await this.ensureGitRepo(projectId);
+
+      let logCommand = 'git log --oneline --format="%H|%s"';
+      if (sinceHash) {
+        logCommand += ` ${sinceHash}..HEAD`;
+      } else {
+        logCommand += ' HEAD';
+      }
+
+      const result = await this.runCommand(projectId, logCommand);
+      if (result.exit_code !== '0') {
+        return [];
+      }
+
+      const commits: Array<{ hash: string; message: string }> = [];
+      const lines = result.stdout.split('\n').filter((l: string) => l.trim());
+
+      for (const line of lines) {
+        const [hash, ...messageParts] = line.split('|');
+        if (hash) {
+          commits.push({
+            hash: hash.trim(),
+            message: messageParts.join('|').trim(),
+          });
+        }
+      }
+
+      return commits;
+    } catch (error) {
+      console.error('Error getting sandbox commit log:', error);
+      return [];
+    }
   }
 }
 

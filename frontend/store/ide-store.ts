@@ -76,6 +76,9 @@ interface IDEState {
   isRunningTests: boolean;
   isStorageInitialized: boolean;
 
+  // Git Sync State
+  gitSyncState: Record<string, { lastSyncedCommitHash: string | null; gitInitialized: boolean }>;
+
   // Project actions
   createProject: (name: string, description?: string) => string;
   deleteProject: (id: string) => void;
@@ -118,6 +121,12 @@ interface IDEState {
   saveFileToStorage: (file: File) => Promise<void>;
   deleteFileFromStorage: (id: string) => Promise<void>;
   loadChatSessionsFromStorage: () => Promise<void>;
+
+  // Git sync operations
+  getLastSyncedCommitHash: (projectId: string) => string | null;
+  setLastSyncedCommitHash: (projectId: string, hash: string | null) => void;
+  isGitInitialized: (projectId: string) => boolean;
+  setGitInitialized: (projectId: string, initialized: boolean) => void;
 }
 
 // Helper: Build folder tree from flat file list
@@ -229,6 +238,7 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
     isExecuting: false,
     isRunningTests: false,
     isStorageInitialized: false,
+    gitSyncState: {},
 
     // Project actions
     createProject: (name, description) => {
@@ -678,6 +688,17 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
 
     loadFilesFromStorage: async () => {
       try {
+        // Load git sync state from localStorage
+        const storedGitSyncStateJson = localStorage.getItem('hathor-git-sync-state');
+        if (storedGitSyncStateJson) {
+          try {
+            const storedGitSyncState = JSON.parse(storedGitSyncStateJson);
+            set({ gitSyncState: storedGitSyncState });
+          } catch (error) {
+            console.warn('Failed to parse git sync state from localStorage:', error);
+          }
+        }
+
         // Load projects from localStorage
         const storedProjectsJson = localStorage.getItem('hathor-projects');
 
@@ -765,6 +786,63 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
         }
       } catch (error) {
         console.error('Failed to load chat sessions from storage:', error);
+      }
+    },
+
+    // Git sync operations
+    getLastSyncedCommitHash: (projectId: string) => {
+      const state = get();
+      return state.gitSyncState[projectId]?.lastSyncedCommitHash || null;
+    },
+
+    setLastSyncedCommitHash: (projectId: string, hash: string | null) => {
+      set((state) => {
+        const currentState = state.gitSyncState[projectId] || { lastSyncedCommitHash: null, gitInitialized: false };
+        return {
+          gitSyncState: {
+            ...state.gitSyncState,
+            [projectId]: {
+              ...currentState,
+              lastSyncedCommitHash: hash,
+            },
+          },
+        };
+      });
+
+      // Persist to localStorage
+      try {
+        const state = get();
+        localStorage.setItem('hathor-git-sync-state', JSON.stringify(state.gitSyncState));
+      } catch (error) {
+        console.error('Failed to save git sync state to localStorage:', error);
+      }
+    },
+
+    isGitInitialized: (projectId: string) => {
+      const state = get();
+      return state.gitSyncState[projectId]?.gitInitialized || false;
+    },
+
+    setGitInitialized: (projectId: string, initialized: boolean) => {
+      set((state) => {
+        const currentState = state.gitSyncState[projectId] || { lastSyncedCommitHash: null, gitInitialized: false };
+        return {
+          gitSyncState: {
+            ...state.gitSyncState,
+            [projectId]: {
+              ...currentState,
+              gitInitialized: initialized,
+            },
+          },
+        };
+      });
+
+      // Persist to localStorage
+      try {
+        const state = get();
+        localStorage.setItem('hathor-git-sync-state', JSON.stringify(state.gitSyncState));
+      } catch (error) {
+        console.error('Failed to save git sync state to localStorage:', error);
       }
     },
   };

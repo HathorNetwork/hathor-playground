@@ -18,11 +18,17 @@ const nextConfig = {
       'node:path': false,
       'node:child_process': false,
       'node:crypto': false,
+      'node:events': false,
+      'node:stream': false,
+      'node:util': false,
       child_process: false,
       crypto: false,
+      events: false,
+      stream: false,
+      util: false,
     };
     
-    // For client-side, ignore node modules that cause issues with Pyodide
+    // For client-side, ignore node modules that cause issues with Pyodide and isomorphic-git
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
@@ -30,6 +36,12 @@ const nextConfig = {
         'node:crypto': false,
         'node:fs': false,
         'node:path': false,
+        'node:events': false,
+        'node:stream': false,
+        'node:util': false,
+        events: false,
+        stream: false,
+        util: false,
       };
     }
     

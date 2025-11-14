@@ -110,6 +110,44 @@ const FolderComponent: React.FC<FolderComponentProps> = ({ folder, level }) => {
   const [newFileName, setNewFileName] = useState('');
   const [newFileType, setNewFileType] = useState<FileType>('contract');
 
+  // Handler to delete entire folder and all its contents
+  const handleDeleteFolder = (e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const folderName = folder.name || 'Root';
+    const fileCount = folder.files.length;
+    const totalFiles = countFilesRecursive(folder);
+
+    if (!confirm(`⚠️ Delete folder "${folderName}" and all ${totalFiles} file(s) inside?\n\nThis cannot be undone.`)) {
+      return;
+    }
+
+    // Delete all files in this folder recursively
+    deleteFilesInFolder(folder);
+  };
+
+  // Recursively count all files in folder and subfolders
+  const countFilesRecursive = (node: FolderNode): number => {
+    let count = node.files.length;
+    node.subfolders.forEach(subfolder => {
+      count += countFilesRecursive(subfolder);
+    });
+    return count;
+  };
+
+  // Recursively delete all files in folder
+  const deleteFilesInFolder = (node: FolderNode) => {
+    // Delete files in current folder
+    node.files.forEach(file => {
+      deleteFile(file.id);
+    });
+
+    // Recursively delete files in subfolders
+    node.subfolders.forEach(subfolder => {
+      deleteFilesInFolder(subfolder);
+    });
+  };
+
   const handleNewFile = () => {
     if (!newFileName.trim()) return;
 
@@ -197,13 +235,22 @@ const FolderComponent: React.FC<FolderComponentProps> = ({ folder, level }) => {
           <span className="text-sm font-medium">{folder.name || 'Root'}</span>
           <span className="text-xs text-gray-500">({folder.files.length + folder.subfolders.length})</span>
         </button>
-        <button
-          onClick={showNewFileOptions}
-          className="p-1 hover:bg-gray-800 rounded transition-colors opacity-0 group-hover:opacity-100"
-          title="New File"
-        >
-          <Plus size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={showNewFileOptions}
+            className="p-1 hover:bg-gray-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+            title="New File"
+          >
+            <Plus size={16} />
+          </button>
+          <button
+            onClick={handleDeleteFolder}
+            className="p-1 hover:bg-red-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+            title="Delete Folder"
+          >
+            <Trash2 size={16} className="text-red-400" />
+          </button>
+        </div>
       </div>
 
       {/* New File Type Menu */}

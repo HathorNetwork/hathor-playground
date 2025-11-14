@@ -12,7 +12,7 @@ export async function GET(
   try {
     const { projectId } = params;
     const { searchParams } = new URL(req.url);
-    const path = searchParams.get('path') || '/app';
+    const relativePath = searchParams.get('path') || '';
 
     if (!projectId) {
       return NextResponse.json(
@@ -21,8 +21,22 @@ export async function GET(
       );
     }
 
-    const files = await beamService.downloadFiles(projectId, path);
-    return NextResponse.json({ files });
+    // Convert relative path to absolute path
+    const absolutePath = relativePath.startsWith('/')
+      ? relativePath  // Already absolute
+      : relativePath
+        ? `/app/${relativePath}`  // Make relative path absolute
+        : '/app';  // Default to /app
+
+    console.log(`[API] Reading files from: ${absolutePath}`);
+    const files = await beamService.downloadFiles(projectId, absolutePath);
+    console.log(`[API] Found ${Object.keys(files).length} files`);
+    if (Object.keys(files).length > 0) {
+      console.log(`[API] Sample file paths:`, Object.keys(files).slice(0, 10));
+    } else {
+      console.warn(`[API] WARNING: No files found! This might indicate an issue with the find command or file filtering.`);
+    }
+    return NextResponse.json({ files, debug: { path: absolutePath, fileCount: Object.keys(files).length } });
   } catch (error: any) {
     console.error('Failed to read files:', error);
     return NextResponse.json(
