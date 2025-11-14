@@ -42,9 +42,76 @@ Use the `sync_dapp()` tool to sync all generated files from the sandbox `/app/ha
 
 The files in `/dapp/` will automatically sync back to the sandbox and the dev server will restart.
 
-## Step 2: Integrate with Contract Development Workflow
+## Step 2: Navigate and Understand the dApp Structure
 
-### 2.1 Add Contract ID to Environment
+### 2.1 Explore Project Structure
+
+**ALWAYS explore before modifying!** Use these navigation tools:
+
+1. **Get full project structure**:
+   ```
+   get_project_structure()  # See all files organized by type
+   ```
+
+2. **List dApp files**:
+   ```
+   list_files("/dapp")  # See all dApp files
+   list_files("/dapp/hathor-dapp/components")  # See components
+   ```
+
+3. **Find specific files**:
+   ```
+   find_file("page.tsx")  # Find all page.tsx files
+   find_file("Header")  # Find Header component
+   find_file("WalletContext", "/dapp")  # Find wallet context in dApp
+   ```
+
+4. **Understand file relationships**:
+   ```
+   get_file_dependencies("/dapp/hathor-dapp/app/page.tsx")  # See what page.tsx imports
+   get_file_dependencies("/dapp/hathor-dapp/components/Header.tsx")  # See Header dependencies
+   ```
+
+5. **Analyze components**:
+   ```
+   analyze_component("/dapp/hathor-dapp/components/Header.tsx")  # Understand component structure
+   ```
+
+### 2.2 Component Integration Workflow
+
+When creating a new component, follow this complete workflow:
+
+#### Step 1: Explore Existing Components
+```
+1. list_files("/dapp/hathor-dapp/components")  # See existing components
+2. analyze_component("/dapp/hathor-dapp/components/Header.tsx")  # Understand patterns
+3. get_file_dependencies("/dapp/hathor-dapp/app/page.tsx")  # See what's imported
+```
+
+#### Step 2: Create the Component
+```
+1. write_file("/dapp/hathor-dapp/components/SimpleCounter.tsx", componentCode)
+2. analyze_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")  # Verify correctness
+```
+
+#### Step 3: Integrate into Application
+```
+1. integrate_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")  # Auto-adds to app/page.tsx
+2. OR specify target: integrate_component(componentPath, "/dapp/hathor-dapp/app/counter/page.tsx")
+```
+
+#### Step 4: Verify Integration
+```
+1. read_file("/dapp/hathor-dapp/app/page.tsx")  # Check import and usage were added
+2. sync_dapp()  # Sync to sandbox
+3. restart_dev_server()  # Restart dev server
+```
+
+**CRITICAL**: A component that isn't integrated is invisible! Always use `integrate_component()` after creating a component.
+
+## Step 3: Integrate with Contract Development Workflow
+
+### 3.1 Add Contract ID to Environment
 
 After the user creates a contract (blueprint), add the contract ID to `.env.local`:
 
@@ -54,7 +121,7 @@ NEXT_PUBLIC_CONTRACT_IDS=["<contract_id_from_blueprint>"]
 
 Use the `write_file` tool to update `/dapp/hathor-dapp/.env.local`.
 
-### 2.2 Create Contract-Specific Component
+### 3.2 Create Contract-Specific Component
 
 Based on the contract blueprint, create a new component in `/dapp/hathor-dapp/components/` that interacts with the specific contract methods.
 
@@ -164,7 +231,17 @@ export default function MyContract() {
 }
 ```
 
-### 2.3 Map Blueprint Methods to dApp Functions
+### 3.3 Integrate Component into Application
+
+After creating the contract component, integrate it:
+
+```
+1. integrate_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")  # Adds to app/page.tsx
+2. read_file("/dapp/hathor-dapp/app/page.tsx")  # Verify integration
+3. sync_dapp()  # Sync to sandbox
+```
+
+### 3.4 Map Blueprint Methods to dApp Functions
 
 For each `@public` method in the blueprint:
 
@@ -182,7 +259,7 @@ For each `@public` method in the blueprint:
 | `def withdraw(self, ctx, amount: int)` | withdrawal | amount from args |
 | `def transfer(self, ctx, to: str, amount: int)` | None | N/A |
 
-### 2.4 Handle Token Amounts Correctly
+### 3.5 Handle Token Amounts Correctly
 
 **CRITICAL**: Hathor uses **cents** for token amounts. Always multiply display values by 100.
 
@@ -201,11 +278,11 @@ actions: [{
 }]
 ```
 
-## Step 3: Where to Add RPC Calls
+## Step 4: Where to Add RPC Calls
 
 The template already includes RPC infrastructure. Here's where to make modifications:
 
-### 3.1 Contract Method Calls
+### 4.1 Contract Method Calls
 
 **Location**: Component files in `/dapp/hathor-dapp/components/YourContract.tsx`
 
@@ -229,7 +306,7 @@ await sendContractTx({
 });
 ```
 
-### 3.2 Read Contract State
+### 4.2 Read Contract State
 
 **Location**: Component files or custom hooks
 
@@ -245,7 +322,7 @@ const state = await getContractState(contractId);
 console.log(state.fields); // Access state variables
 ```
 
-### 3.3 Custom RPC Methods (Advanced)
+### 4.3 Custom RPC Methods (Advanced)
 
 If you need to add custom RPC methods beyond the template:
 
@@ -265,25 +342,35 @@ export class HathorRPCService {
 
 Then expose it in the WalletContext (`/dapp/hathor-dapp/contexts/WalletContext.tsx`).
 
-## Step 4: Blueprint-to-dApp Integration Checklist
+## Step 5: Blueprint-to-dApp Integration Checklist
 
 When a user provides a blueprint and asks for a dApp:
 
 1. ✅ **Run `create-hathor-dapp`** to generate the template
 2. ✅ **Run `sync_dapp()`** to sync files from sandbox to IDE
-3. ✅ **Parse the blueprint** to identify:
+3. ✅ **Explore project structure**:
+   - `get_project_structure()` - See full project layout
+   - `list_files("/dapp")` - List all dApp files
+   - `find_file("page.tsx")` - Find main page
+   - `get_file_dependencies("/dapp/hathor-dapp/app/page.tsx")` - Understand imports
+4. ✅ **Parse the blueprint** to identify:
    - Contract state variables
    - `@public` methods and their signatures
    - Required actions (deposits/withdrawals)
-4. ✅ **Update `.env.local`** with the contract ID
-4. ✅ **Create a contract component** that:
+5. ✅ **Update `.env.local`** with the contract ID
+6. ✅ **Create a contract component** that:
    - Displays contract state
    - Provides UI for each @public method
    - Handles transactions correctly
-5. ✅ **Add the component** to the main page (`/dapp/hathor-dapp/app/page.tsx`)
-6. ✅ **Test thoroughly** on testnet before suggesting mainnet
+7. ✅ **Integrate the component**:
+   - `integrate_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")` - Auto-adds to page
+   - `read_file("/dapp/hathor-dapp/app/page.tsx")` - Verify integration
+8. ✅ **Sync and deploy**:
+   - `sync_dapp()` - Sync to sandbox
+   - `restart_dev_server()` - Restart dev server
+9. ✅ **Test thoroughly** on testnet before suggesting mainnet
 
-## Step 5: Common User Requests and Responses
+## Step 6: Common User Requests and Responses
 
 ### Request: "Create a dApp for my contract"
 
@@ -333,7 +420,7 @@ useEffect(() => {
 <div>Balance: {state?.balance || 0} HTR</div>
 ```
 
-## Step 6: Testing Workflow
+## Step 7: Testing Workflow
 
 1. **Use testnet** during development (already configured in template)
 2. **Enable mock mode** for UI testing without wallet:

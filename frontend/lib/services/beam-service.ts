@@ -722,15 +722,43 @@ export class BeamService {
         }));
       }
 
+      // First, check if the commit exists
+      const checkCommitResult = await this.runCommand(
+        projectId,
+        `git rev-parse --verify ${sinceHash}`
+      );
+
+      // If commit doesn't exist, treat as first sync (all files are new)
+      if (checkCommitResult.exit_code !== '0' || 
+          checkCommitResult.stderr.includes('fatal:') ||
+          checkCommitResult.stderr.includes('Invalid revision')) {
+        console.warn(`[SYNC] Commit ${sinceHash} doesn't exist in sandbox, treating as first sync`);
+        const listResult = await this.runCommand(projectId, 'git ls-files');
+        const files = listResult.stdout.split('\n').filter((f: string) => f.trim());
+        return files.map((path: string) => ({
+          path: path.replace(/^\.\//, ''), // Remove leading ./
+          status: 'added' as const,
+        }));
+      }
+
       // Get diff between sinceHash and HEAD
       const diffResult = await this.runCommand(
         projectId,
         `git diff --name-status ${sinceHash}..HEAD`
       );
 
-      if (diffResult.exit_code !== '0') {
-        console.warn('git diff failed:', diffResult.stderr);
-        return [];
+      // Check for "Invalid revision range" error even if exit code is 0
+      if (diffResult.exit_code !== '0' || 
+          diffResult.stderr.includes('Invalid revision range') ||
+          diffResult.stderr.includes('fatal: Invalid revision')) {
+        console.warn(`[SYNC] Invalid revision range ${sinceHash}..HEAD, treating as first sync`);
+        // Fallback: return all files as new
+        const listResult = await this.runCommand(projectId, 'git ls-files');
+        const files = listResult.stdout.split('\n').filter((f: string) => f.trim());
+        return files.map((path: string) => ({
+          path: path.replace(/^\.\//, ''), // Remove leading ./
+          status: 'added' as const,
+        }));
       }
 
       const changedFiles: Array<{ path: string; status: 'added' | 'modified' | 'deleted' }> = [];

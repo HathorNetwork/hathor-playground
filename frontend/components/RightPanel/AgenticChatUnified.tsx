@@ -81,7 +81,7 @@ export const AgenticChatUnified: React.FC = () => {
       }
 
       const toolName = toolCall.toolName;
-      const args = toolCall.input || toolCall.args || {};
+      const args = (toolCall as any).input || (toolCall as any).args || {};
 
       console.log('🔧 Tool call:', toolName, args);
       console.log('🔧 Tool call ID:', toolCall.toolCallId);
@@ -134,7 +134,23 @@ export const AgenticChatUnified: React.FC = () => {
             break;
 
           case 'get_project_structure':
-            result = await AIToolsClient.getProjectStructure();
+            result = await AIToolsClient.getProjectStructure(args.filterByType);
+            break;
+
+          case 'find_file':
+            result = await AIToolsClient.findFile(args.pattern, args.searchPath);
+            break;
+
+          case 'get_file_dependencies':
+            result = await AIToolsClient.getFileDependencies(args.filePath);
+            break;
+
+          case 'analyze_component':
+            result = await AIToolsClient.analyzeComponent(args.filePath);
+            break;
+
+          case 'integrate_component':
+            result = await AIToolsClient.integrateComponent(args.componentPath, args.targetPage);
             break;
 
           // ========== Blueprint Tools ==========

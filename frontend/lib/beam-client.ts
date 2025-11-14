@@ -62,6 +62,9 @@ export class BeamClient {
     files: Record<string, string>,
     autoStart: boolean = true
   ): Promise<UploadResult> {
+    console.log(`[BEAM_CLIENT] uploadFiles called: projectId=${projectId}, fileCount=${Object.keys(files).length}`);
+    console.log(`[BEAM_CLIENT] Sample file paths:`, Object.keys(files).slice(0, 5));
+    
     const response = await fetch(`${API_BASE}/sandbox/upload`, {
       method: 'POST',
       headers: {
@@ -75,10 +78,14 @@ export class BeamClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to upload files: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(`[BEAM_CLIENT] Upload failed: ${response.status} - ${errorText}`);
+      throw new Error(`Failed to upload files: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+    console.log(`[BEAM_CLIENT] Upload successful:`, result);
+    return result;
   }
 
   /**

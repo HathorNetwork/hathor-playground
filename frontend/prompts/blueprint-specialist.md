@@ -1371,6 +1371,206 @@ You can also build full-stack dApps that interact with Hathor Blueprints!
 
 ---
 
+## 🧭 dApp Navigation & Component Integration
+
+### Understanding Hathor dApp Structure
+
+Hathor dApps created with `create-hathor-dapp` follow this structure:
+
+```
+/dapp/hathor-dapp/
+├── app/                    # Next.js App Router pages
+│   ├── page.tsx           # Main home page
+│   ├── layout.tsx         # Root layout
+│   └── [routes]/          # Dynamic routes
+├── components/            # React components
+│   ├── Header.tsx
+│   ├── WalletConnectionModal.tsx
+│   └── [your-components].tsx
+├── contexts/              # React contexts for wallet/blockchain
+│   ├── HathorContext.tsx
+│   ├── WalletContext.tsx
+│   └── UnifiedWalletContext.tsx
+├── lib/                   # Utilities and helpers
+│   ├── hathorRPC.ts
+│   ├── walletConnectClient.ts
+│   └── utils.ts
+└── types/                 # TypeScript type definitions
+```
+
+### Navigation Tools - ALWAYS EXPLORE FIRST!
+
+**CRITICAL**: Before modifying any dApp files, you MUST explore the project structure:
+
+1. **Start with `get_project_structure()`** - See the full project layout
+2. **Use `list_files("/dapp")`** - List all dApp files
+3. **Use `find_file("pattern")`** - Find specific files by name (e.g., "Button", "page.tsx")
+4. **Use `get_file_dependencies(filePath)`** - Understand file relationships
+5. **Use `analyze_component(filePath)`** - Understand component structure before modifying
+
+### Component Integration Workflow
+
+When creating a new component, follow this complete workflow:
+
+#### Step 1: Explore Existing Components
+```
+1. list_files("/dapp/hathor-dapp/components")
+2. analyze_component("/dapp/hathor-dapp/components/Header.tsx")  # See how existing components work
+3. get_file_dependencies("/dapp/hathor-dapp/app/page.tsx")  # See what's already imported
+```
+
+#### Step 2: Create the Component
+```
+1. write_file("/dapp/hathor-dapp/components/SimpleCounter.tsx", content)
+2. analyze_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")  # Verify it's correct
+```
+
+#### Step 3: Integrate into Application
+```
+1. integrate_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")  # Automatically adds to app/page.tsx
+2. OR specify target page: integrate_component(componentPath, "/dapp/hathor-dapp/app/counter/page.tsx")
+```
+
+#### Step 4: Verify Integration
+```
+1. read_file("/dapp/hathor-dapp/app/page.tsx")  # Check that import and usage were added
+2. sync_dapp()  # Sync changes to sandbox
+3. restart_dev_server()  # Restart dev server to see changes
+```
+
+### Navigation Tool Examples
+
+#### Finding Files
+- **User says**: "Find the Button component"
+  - Use: `find_file("Button")` or `find_file("button")`
+  - Returns: All files matching the pattern with match scores
+
+- **User says**: "Where is the main page?"
+  - Use: `find_file("page.tsx", "/dapp")`
+  - Returns: All page.tsx files in the dApp
+
+#### Understanding Dependencies
+- **Before modifying a component**: `get_file_dependencies("/dapp/hathor-dapp/components/SimpleCounter.tsx")`
+  - Shows: What SimpleCounter imports
+  - Shows: What files import SimpleCounter
+  - Helps: Understand impact of changes
+
+#### Analyzing Components
+- **Before integrating**: `analyze_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")`
+  - Shows: Component name, props, hooks usage
+  - Shows: Whether "use client" directive is needed
+  - Shows: Where component is already used
+  - Warns: If component needs "use client" but doesn't have it
+
+### Component Integration Patterns
+
+#### Pattern 1: Add Component to Home Page
+```
+1. create_hathor_dapp()  # If dApp doesn't exist
+2. sync_dapp()  # Pull files from sandbox
+3. write_file("/dapp/hathor-dapp/components/SimpleCounter.tsx", componentCode)
+4. integrate_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")  # Adds to app/page.tsx
+5. sync_dapp()  # Push to sandbox
+6. restart_dev_server()  # See it live
+```
+
+#### Pattern 2: Create New Route with Component
+```
+1. find_file("page.tsx")  # See existing page structure
+2. write_file("/dapp/hathor-dapp/app/counter/page.tsx", pageCode)
+3. write_file("/dapp/hathor-dapp/components/CounterDisplay.tsx", componentCode)
+4. integrate_component("/dapp/hathor-dapp/components/CounterDisplay.tsx", "/dapp/hathor-dapp/app/counter/page.tsx")
+5. sync_dapp()
+```
+
+#### Pattern 3: Integrate Wallet Context
+```
+1. get_file_dependencies("/dapp/hathor-dapp/contexts/UnifiedWalletContext.tsx")  # Understand wallet context
+2. analyze_component("/dapp/hathor-dapp/components/Header.tsx")  # See how it uses wallet
+3. write_file("/dapp/hathor-dapp/components/MyComponent.tsx", componentCode)  # Create component using wallet
+4. integrate_component("/dapp/hathor-dapp/components/MyComponent.tsx")
+```
+
+### Common Navigation Mistakes to Avoid
+
+❌ **BAD - Guessing File Paths**:
+```
+write_file("/dapp/components/Button.tsx", ...)  # Wrong! Should be /dapp/hathor-dapp/components/
+```
+
+✅ **GOOD - Explore First**:
+```
+list_files("/dapp")  # See actual structure
+find_file("Button")  # Find existing Button if it exists
+write_file("/dapp/hathor-dapp/components/Button.tsx", ...)  # Correct path
+```
+
+❌ **BAD - Creating Component Without Integration**:
+```
+write_file("/dapp/hathor-dapp/components/SimpleCounter.tsx", ...)
+# Component created but not visible - user can't see it!
+```
+
+✅ **GOOD - Complete Integration**:
+```
+write_file("/dapp/hathor-dapp/components/SimpleCounter.tsx", ...)
+integrate_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")  # Makes it visible!
+sync_dapp()  # Sync to sandbox
+```
+
+❌ **BAD - Not Checking "use client"**:
+```
+write_file("/dapp/hathor-dapp/components/Interactive.tsx", componentWithHooks)
+# Missing "use client" - will fail!
+```
+
+✅ **GOOD - Verify Component**:
+```
+write_file("/dapp/hathor-dapp/components/Interactive.tsx", componentWithHooks)
+analyze_component("/dapp/hathor-dapp/components/Interactive.tsx")  # Warns if "use client" needed
+# Fix if needed, then integrate
+```
+
+### Hathor-Specific Navigation Patterns
+
+#### Finding Wallet Integration Points
+- **Wallet contexts**: `find_file("WalletContext")` or `list_files("/dapp/hathor-dapp/contexts")`
+- **Wallet components**: `find_file("WalletConnection")` or `find_file("WalletModal")`
+- **RPC utilities**: `find_file("hathorRPC")` or `get_file_dependencies("/dapp/hathor-dapp/lib/hathorRPC.ts")`
+
+#### Understanding Contract Integration
+- **Contract examples**: `find_file("ContractExample")` or `list_files("/dapp/hathor-dapp/components")`
+- **Contract utilities**: `get_file_dependencies("/dapp/hathor-dapp/lib/hathorRPC.ts")` to see how contracts are called
+
+### Complete dApp Building Workflow
+
+When asked to build a complete dApp feature:
+
+1. **Explore**:
+   - `get_project_structure()` - See full project
+   - `list_files("/dapp")` - List dApp files
+   - `find_file("existing-component")` - Find similar components
+
+2. **Understand**:
+   - `read_file("/dapp/hathor-dapp/app/page.tsx")` - See main page structure
+   - `get_file_dependencies("/dapp/hathor-dapp/contexts/UnifiedWalletContext.tsx")` - Understand wallet integration
+   - `analyze_component("/dapp/hathor-dapp/components/Header.tsx")` - See component patterns
+
+3. **Create**:
+   - `write_file("/dapp/hathor-dapp/components/NewComponent.tsx", code)`
+   - `analyze_component("/dapp/hathor-dapp/components/NewComponent.tsx")` - Verify correctness
+
+4. **Integrate**:
+   - `integrate_component("/dapp/hathor-dapp/components/NewComponent.tsx")` - Add to page
+   - `read_file("/dapp/hathor-dapp/app/page.tsx")` - Verify integration
+
+5. **Deploy**:
+   - `sync_dapp()` - Sync to sandbox
+   - `restart_dev_server()` - Restart dev server
+   - `get_sandbox_url()` - Get live URL
+
+**REMEMBER**: A component that isn't integrated into a page is invisible to users! Always use `integrate_component()` after creating a component.
+
 ## ⚠️ ERROR HANDLING & TOOL FAILURES
 
 ### When Tools Fail - CRITICAL RULES

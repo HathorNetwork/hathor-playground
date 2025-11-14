@@ -193,9 +193,39 @@ export async function POST(req: Request) {
         }),
 
         get_project_structure: tool({
-          description: 'Get tree view of entire project',
+          description: 'Get hierarchical tree view of entire project with file types, sizes, and filtering options',
           parameters: z.object({
-            _unused: z.string().optional().describe('Unused parameter'),
+            filterByType: z.enum(['blueprints', 'tests', 'dapp', 'components', 'pages', 'configs']).optional().describe('Filter files by type (optional)'),
+          }),
+        }),
+
+        find_file: tool({
+          description: 'Find files by name pattern using fuzzy matching. Useful when user asks "find the Button component" or "where is page.tsx"',
+          parameters: z.object({
+            pattern: z.string().describe('File name pattern to search for (e.g., "Button", "page.tsx", "SimpleCounter")'),
+            searchPath: z.string().optional().describe('Optional: Limit search to specific directory path (e.g., "/dapp/")'),
+          }),
+        }),
+
+        get_file_dependencies: tool({
+          description: 'Analyze file dependencies - shows what a file imports and what files import it. Helps understand component relationships and dependencies.',
+          parameters: z.object({
+            filePath: z.string().describe('Path to the file to analyze (e.g., "/dapp/hathor-dapp/components/SimpleCounter.tsx")'),
+          }),
+        }),
+
+        analyze_component: tool({
+          description: 'Analyze a React component file - extracts component name, props, hooks usage, "use client" directive, and where it is used. Helps understand component structure and integration needs.',
+          parameters: z.object({
+            filePath: z.string().describe('Path to component file (must be .tsx or .jsx)'),
+          }),
+        }),
+
+        integrate_component: tool({
+          description: 'Automatically integrate a component into a page/route. Adds import statement and component usage. If targetPage is not specified, defaults to app/page.tsx. Use this after creating a new component to make it visible in the app.',
+          parameters: z.object({
+            componentPath: z.string().describe('Path to the component file to integrate (e.g., "/dapp/hathor-dapp/components/SimpleCounter.tsx")'),
+            targetPage: z.string().optional().describe('Optional: Target page path (defaults to app/page.tsx if not specified)'),
           }),
         }),
 
