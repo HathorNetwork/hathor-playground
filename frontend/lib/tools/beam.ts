@@ -4,6 +4,33 @@ import type { File } from '@/store/ide-store';
 
 import { ToolResult } from './types';
 
+let activeLogStream: EventSource | null = null;
+
+function startSandboxLogStream(projectId: string, addConsoleMessage?: (type: 'info' | 'error' | 'warning' | 'success', message: string) => void) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (activeLogStream) {
+    activeLogStream.close();
+    activeLogStream = null;
+  }
+
+  try {
+    activeLogStream = beamClient.streamLogs(
+      projectId,
+      (log) => addConsoleMessage?.('info', log),
+      (error) => {
+        console.warn('Sandbox log stream error:', error);
+        activeLogStream?.close();
+        activeLogStream = null;
+      },
+    );
+  } catch (error) {
+    console.warn('Failed to start sandbox log stream:', error);
+  }
+}
+
 async function runCommand(command: string): Promise<ToolResult> {
   try {
     const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
@@ -197,7 +224,7 @@ async function createHathorDapp(
 
 async function deployDApp(): Promise<ToolResult> {
   try {
-    const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
+    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
 
     if (!activeProjectId) {
       return {
@@ -243,6 +270,10 @@ async function deployDApp(): Promise<ToolResult> {
       devServerResult = await restartDevServer();
       if (devServerResult.success) {
         addConsoleMessage?.('success', `🌐 Dev server running at: ${devServerResult.data.url}`);
+        if (devServerResult.data?.url) {
+          setSandboxUrl(activeProjectId, devServerResult.data.url);
+          startSandboxLogStream(activeProjectId, addConsoleMessage);
+        }
       }
     } catch (devError) {
       console.warn('Failed to start dev server:', devError);
@@ -323,7 +354,7 @@ async function uploadFiles(paths: string[]): Promise<ToolResult> {
 
 async function getSandboxUrl(): Promise<ToolResult> {
   try {
-    const { activeProjectId } = useIDEStore.getState();
+    const { activeProjectId, setSandboxUrl } = useIDEStore.getState();
 
     if (!activeProjectId) {
       return {
@@ -342,6 +373,8 @@ async function getSandboxUrl(): Promise<ToolResult> {
         error: 'Deploy the dApp first using deploy_dapp()',
       };
     }
+
+    setSandboxUrl(activeProjectId, sandbox.url);
 
     return {
       success: true,
@@ -363,7 +396,7 @@ async function getSandboxUrl(): Promise<ToolResult> {
 
 async function restartDevServer(): Promise<ToolResult> {
   try {
-    const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
+    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
 
     if (!activeProjectId) {
       return {
@@ -376,6 +409,11 @@ async function restartDevServer(): Promise<ToolResult> {
     addConsoleMessage?.('info', '🔄 Restarting dev server...');
 
     const result = await beamClient.startDevServer(activeProjectId);
+
+    if (result.url) {
+      setSandboxUrl(activeProjectId, result.url);
+      startSandboxLogStream(activeProjectId, addConsoleMessage);
+    }
 
     return {
       success: true,

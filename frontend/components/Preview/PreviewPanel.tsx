@@ -5,7 +5,7 @@ import { ExternalLink, RotateCcw, Loader2 } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 
 export const PreviewPanel: React.FC = () => {
-  const { activeProjectId, files } = useIDEStore();
+  const { activeProjectId, files, sandboxUrls, setSandboxUrl } = useIDEStore();
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [iframeReady, setIframeReady] = useState(false);
@@ -13,10 +13,20 @@ export const PreviewPanel: React.FC = () => {
   const [isDeploying, setIsDeploying] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Load sandbox URL for active project
+  const storedSandboxUrl = activeProjectId ? sandboxUrls[activeProjectId] || null : null;
+
   useEffect(() => {
     if (!activeProjectId) {
       setIframeUrl(null);
+      return;
+    }
+    setIframeUrl(storedSandboxUrl);
+  }, [activeProjectId, storedSandboxUrl]);
+
+  // Load sandbox URL for active project if missing
+  useEffect(() => {
+    if (!activeProjectId || storedSandboxUrl) {
+      setError(null);
       return;
     }
 
@@ -30,12 +40,12 @@ export const PreviewPanel: React.FC = () => {
         if (response.ok) {
           const data = await response.json();
           if (data && data.url) {
-            setIframeUrl(data.url);
+            setSandboxUrl(activeProjectId, data.url);
           } else {
-            setIframeUrl(null);
+            setSandboxUrl(activeProjectId, null);
           }
         } else {
-          setIframeUrl(null);
+          setSandboxUrl(activeProjectId, null);
         }
       } catch (err) {
         console.error('Failed to load sandbox:', err);
@@ -46,8 +56,14 @@ export const PreviewPanel: React.FC = () => {
     };
 
     loadSandbox();
+  }, [activeProjectId, storedSandboxUrl, setSandboxUrl]);
 
-    // Subscribe to sandbox events (SSE) for real-time URL updates
+  // Subscribe to sandbox events (SSE) for real-time URL updates
+  useEffect(() => {
+    if (!activeProjectId) {
+      return;
+    }
+
     const eventSource = new EventSource(`/api/beam/sandbox/${activeProjectId}/events`);
 
     eventSource.onmessage = (event) => {
@@ -56,11 +72,11 @@ export const PreviewPanel: React.FC = () => {
 
         if (data.type === 'sandbox_ready' || data.type === 'sandbox_updated') {
           console.log('Sandbox URL updated:', data.url);
-          setIframeUrl(data.url);
+          setSandboxUrl(activeProjectId, data.url);
           setError(null);
         } else if (data.type === 'sandbox_removed') {
           console.log('Sandbox removed');
-          setIframeUrl(null);
+          setSandboxUrl(activeProjectId, null);
         }
       } catch (err) {
         console.error('Failed to parse SSE event:', err);
@@ -75,7 +91,7 @@ export const PreviewPanel: React.FC = () => {
     return () => {
       eventSource.close();
     };
-  }, [activeProjectId]);
+  }, [activeProjectId, setSandboxUrl]);
 
   const refreshIframe = useCallback(() => {
     if (iframeRef.current && iframeUrl) {

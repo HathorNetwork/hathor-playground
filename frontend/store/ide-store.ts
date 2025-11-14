@@ -74,6 +74,7 @@ interface IDEState {
   isExecuting: boolean;
   isRunningTests: boolean;
   isStorageInitialized: boolean;
+  sandboxUrls: Record<string, string | null>;
 
   // Project actions
   createProject: (name: string, description?: string) => string;
@@ -117,6 +118,9 @@ interface IDEState {
   saveFileToStorage: (file: File) => Promise<void>;
   deleteFileFromStorage: (id: string) => Promise<void>;
   loadChatSessionsFromStorage: () => Promise<void>;
+
+  setSandboxUrl: (projectId: string, url: string | null) => void;
+  getSandboxUrlValue: (projectId: string) => string | null;
 
 }
 
@@ -199,6 +203,7 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
     isExecuting: false,
     isRunningTests: false,
     isStorageInitialized: false,
+    sandboxUrls: {},
 
     // Project actions
     createProject: (name, description) => {
@@ -672,6 +677,16 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
           }
         }
 
+        const storedSandboxUrlsJson = localStorage.getItem('hathor-sandbox-urls');
+        if (storedSandboxUrlsJson) {
+          try {
+            const storedSandboxUrls = JSON.parse(storedSandboxUrlsJson);
+            set({ sandboxUrls: storedSandboxUrls });
+          } catch (error) {
+            console.warn('Failed to parse sandbox URLs from localStorage:', error);
+          }
+        }
+
         // Fallback: no stored projects, keep sample projects
         console.log('No stored projects found, using sample projects');
       } catch (error) {
@@ -731,6 +746,28 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
       } catch (error) {
         console.error('Failed to load chat sessions from storage:', error);
       }
+    },
+
+    setSandboxUrl: (projectId, url) => {
+      set((state) => {
+        const sandboxUrls = {
+          ...state.sandboxUrls,
+          [projectId]: url,
+        };
+
+        try {
+          localStorage.setItem('hathor-sandbox-urls', JSON.stringify(sandboxUrls));
+        } catch (error) {
+          console.warn('Failed to persist sandbox URLs:', error);
+        }
+
+        return { sandboxUrls };
+      });
+    },
+
+    getSandboxUrlValue: (projectId) => {
+      const state = get();
+      return state.sandboxUrls[projectId] || null;
     },
 
   };

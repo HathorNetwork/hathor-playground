@@ -35,7 +35,7 @@ export const DAppManualControls: React.FC = () => {
     try {
       const result = await beamTools.deployDApp();
       if (result.success) {
-        addConsoleMessage('success', `✅ dApp deployed: ${result.data?.url ?? 'sandbox updated'}`);
+        addConsoleMessage('success', result.message);
       } else {
         addConsoleMessage('error', `❌ Deploy failed: ${result.error}`);
       }
