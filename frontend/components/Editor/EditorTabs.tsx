@@ -51,10 +51,11 @@ export const EditorTabs: React.FC = () => {
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={openFileIds} strategy={() => null} >
         <div
-          className="flex"
+          className="flex overflow-x-auto scrollbar-thin"
           style={{
             background: 'var(--elegant-darkest)',
-            borderBottom: '1px solid var(--border-subtle)'
+            borderBottom: '1px solid var(--border-subtle)',
+            WebkitOverflowScrolling: 'touch',
           }}
         >
           {openFileIds.map((fileId) => {
@@ -68,7 +69,7 @@ export const EditorTabs: React.FC = () => {
                 <div
                   onClick={() => setActiveFile(file.id)}
                   className={clsx(
-                    'relative flex items-center gap-2.5 px-4 py-2.5 cursor-pointer transition-all duration-200',
+                    'relative flex items-center gap-2.5 px-4 py-2.5 cursor-pointer transition-all duration-200 group',
                     'border-r',
                   )}
                   style={{
@@ -106,7 +107,7 @@ export const EditorTabs: React.FC = () => {
                       e.stopPropagation();
                       closeFile(file.id);
                     }}
-                    className="p-0.5 rounded transition-all duration-200 opacity-0 group-hover:opacity-100"
+                    className="p-0.5 rounded transition-all duration-200 opacity-40 group-hover:opacity-100"
                     style={{
                       color: 'var(--text-muted)',
                     }}

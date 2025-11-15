@@ -170,6 +170,36 @@ export const AgenticChatUnified: React.FC = () => {
       ]);
       const isExploratoryTool = exploratoryTools.has(toolName);
 
+      const creatingDapp =
+        toolName === 'create_hathor_dapp' ||
+        (toolName === 'bootstrap_nextjs' && args?.preset === 'hathor');
+      const missingScaffold =
+        !files.some((file) => file.path.startsWith('/dapp/app/')) &&
+        !files.some((file) => file.path.startsWith('/dapp/pages/')) &&
+        !files.some((file) => file.path.endsWith('/package.json'));
+
+      if (missingScaffold && !creatingDapp) {
+        const scaffoldResult = {
+          success: false,
+          message:
+            '🚨 Missing Hathor dApp scaffold. Run create_hathor_dapp({ app_name, wallet_connect_id, network }) before editing /dapp files.',
+          error: 'Hathor dApp scaffold not detected. Must call create_hathor_dapp first.',
+        };
+
+        addToolResult({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          output: scaffoldResult,
+        });
+
+        addConsoleMessage(
+          'warning',
+          '⚠️ Hathor dApp scaffold is missing. create_hathor_dapp must be called before any dApp edit.',
+        );
+
+        return JSON.stringify(scaffoldResult);
+      }
+
       if (!planConfirmedRef.current && !isExploratoryTool) {
         const planningResult = {
           success: false,
