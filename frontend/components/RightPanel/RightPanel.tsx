@@ -25,38 +25,38 @@ export const RightPanel: React.FC = () => {
         <button
           onClick={() => setActiveTab('preview')}
           className={clsx(
-            'flex items-center gap-2 px-4 py-2 transition-colors border-b-2',
+            'flex items-center gap-2 px-4 py-2 transition-colors border-b-2 [@media(max-width:250px)]:justify-center [@media(max-width:250px)]:px-2',
             activeTab === 'preview'
               ? 'border-blue-500 bg-gray-900 text-white'
               : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-700'
           )}
         >
           <Monitor size={16} />
-          <span className="hidden sm:inline text-sm font-medium">Preview</span>
+          <span className="text-sm font-medium max-[250px]:hidden">Preview</span>
         </button>
         <button
           onClick={() => setActiveTab('ai')}
           className={clsx(
-            'flex items-center gap-2 px-4 py-2 transition-colors border-b-2',
+            'flex items-center gap-2 px-4 py-2 transition-colors border-b-2 [@media(max-width:250px)]:justify-center [@media(max-width:250px)]:px-2',
             activeTab === 'ai'
               ? 'border-purple-500 bg-gray-900 text-white'
               : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-700'
           )}
         >
           <Sparkles size={16} />
-          <span className="hidden sm:inline text-sm font-medium">AI Agent</span>
+          <span className="text-sm font-medium max-[250px]:hidden">AI Agent</span>
         </button>
         <button
           onClick={() => setActiveTab('controls')}
           className={clsx(
-            'flex items-center gap-2 px-4 py-2 transition-colors border-b-2',
+            'flex items-center gap-2 px-4 py-2 transition-colors border-b-2 [@media(max-width:250px)]:justify-center [@media(max-width:250px)]:px-2',
             activeTab === 'controls'
               ? 'border-green-500 bg-gray-900 text-white'
               : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-700'
           )}
         >
           <Terminal size={16} />
-          <span className="hidden sm:inline text-sm font-medium whitespace-nowrap">Manual Controls</span>
+          <span className="text-sm font-medium whitespace-nowrap max-[250px]:hidden">Manual Controls</span>
         </button>
       </div>
 

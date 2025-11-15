@@ -913,7 +913,9 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
 
   updateFile(targetPageFile.id, updatedContent);
 
-  const message = [
+  const autoSyncResult = await autoSyncIfNeeded(targetPagePath);
+
+  const baseMessage = [
     `✅ Integrated ${componentName} into ${targetPagePath}`,
     '',
     ...changes,
@@ -922,6 +924,8 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
     `📄 Target page: ${targetPagePath}`,
     `🔗 Import path: ${importPath}`,
   ].join('\n');
+
+  const message = formatAutoSyncMessage(baseMessage, autoSyncResult);
 
   return {
     success: true,
@@ -932,6 +936,7 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
       componentName,
       importPath,
       changes,
+      autoDeploy: autoSyncResult ?? undefined,
     },
   };
 } catch (error) {
