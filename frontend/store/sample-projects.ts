@@ -1,9 +1,16 @@
 import { Project, File } from './ide-store';
 
 // Sample projects to initialize the IDE with
+function makeProjectId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export const SAMPLE_PROJECTS: Project[] = [
   {
-    id: 'counter-dapp',
+    id: makeProjectId('counter-dapp'),
     name: 'Counter dApp',
     description: 'A simple counter contract with increment/reset functionality',
     created: Date.now(),
@@ -134,7 +141,7 @@ class CounterTestCase(BlueprintTestCase):
     ],
   },
   {
-    id: 'defi-dapp',
+    id: makeProjectId('defi-dapp'),
     name: 'DeFi dApp',
     description: 'Liquidity pool and token swap contracts',
     created: Date.now(),

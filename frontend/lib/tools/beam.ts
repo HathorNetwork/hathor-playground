@@ -5,6 +5,27 @@ import type { File } from '@/store/ide-store';
 
 import { ToolResult } from './types';
 
+const formatToolError = (result: ToolResult): string => {
+  const parts: string[] = [];
+  if (result.message) {
+    parts.push(result.message);
+  }
+  const stdout = (result.data as any)?.stdout;
+  const stderr = (result.data as any)?.stderr;
+  if (stdout) {
+    parts.push(`stdout:\n${stdout}`);
+  }
+  if (stderr) {
+    parts.push(`stderr:\n${stderr}`);
+  }
+  if (result.error) {
+    const err =
+      typeof result.error === 'object' ? JSON.stringify(result.error) : String(result.error);
+    parts.push(`error:\n${err}`);
+  }
+  return parts.join('\n');
+};
+
 let activeLogStream: EventSource | null = null;
 
 function startSandboxLogStream(projectId: string, addConsoleMessage?: (type: 'info' | 'error' | 'warning' | 'success', message: string) => void) {
@@ -52,18 +73,26 @@ async function runCommand(command: string): Promise<ToolResult> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command }),
       });
+      const responseText = await response.text();
       if (!response.ok) {
-        const error = await response.json();
+        const errorPayload = responseText || response.statusText || 'Unknown command error';
         return {
           success: false,
-          message: '❌ Command failed',
-          error: error.error || response.statusText,
+          message: `❌ Command failed (${response.status})\n${errorPayload}`,
+          error: errorPayload,
         };
       }
-      const result = await response.json();
+
+      let result: any = {};
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch (parseError) {
+        result = { raw: responseText };
+      }
+
       return {
         success: true,
-        message: `✅ Command executed successfully`,
+        message: '✅ Command executed successfully',
         data: result,
       };
     }
@@ -183,8 +212,9 @@ async function createHathorDapp(
 
     const checkDirCmd = `cd /app && test -d ${resolvedAppName} && echo "exists" || echo "not_exists"`;
     const checkResult = await runCommand(checkDirCmd);
+    const dirStatus = (checkResult.data?.stdout || '').trim();
 
-    if (checkResult.data?.stdout?.includes('exists')) {
+    if (dirStatus === 'exists') {
       addConsoleMessage?.('warning', `⚠️ /app already contains ${resolvedAppName}. Remove it first or purge the sandbox.`);
       return {
         success: false,
@@ -194,11 +224,11 @@ async function createHathorDapp(
     }
 
     addConsoleMessage?.('info', '🧹 Purging /app before scaffolding...');
-    const purgeResult = await runCommand('cd /app && rm -rf * && rm -rf .* 2>/dev/null || true');
+    const purgeResult = await runCommand('cd /app && find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +');
     if (!purgeResult.success) {
       return {
         success: false,
-        message: '❌ Failed to purge /app before scaffolding',
+        message: formatToolError(purgeResult) || '❌ Failed to purge /app before scaffolding',
         error: purgeResult.error || purgeResult.message,
       };
     }
@@ -221,7 +251,7 @@ async function createHathorDapp(
 
     const checkPackageCmd = `cd /app && ls -la ${resolvedAppName}/package.json 2>/dev/null || echo "missing"`;
     const checkPackageResult = await runCommand(checkPackageCmd);
-    const packageExists = checkPackageResult.data?.stdout && !checkPackageResult.data?.stdout.includes('missing');
+    const packageExists = (checkPackageResult.data?.stdout || '').trim() !== 'missing';
 
     if (!packageExists) {
       const stdout = execResult.data?.stdout || '';

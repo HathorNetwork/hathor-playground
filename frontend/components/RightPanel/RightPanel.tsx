@@ -32,7 +32,7 @@ export const RightPanel: React.FC = () => {
           )}
         >
           <Monitor size={16} />
-          <span className="text-sm font-medium">Preview</span>
+          <span className="hidden sm:inline text-sm font-medium">Preview</span>
         </button>
         <button
           onClick={() => setActiveTab('ai')}
@@ -44,7 +44,7 @@ export const RightPanel: React.FC = () => {
           )}
         >
           <Sparkles size={16} />
-          <span className="text-sm font-medium">AI Agent</span>
+          <span className="hidden sm:inline text-sm font-medium">AI Agent</span>
         </button>
         <button
           onClick={() => setActiveTab('controls')}
@@ -56,7 +56,7 @@ export const RightPanel: React.FC = () => {
           )}
         >
           <Terminal size={16} />
-          <span className="text-sm font-medium">Manual Controls</span>
+          <span className="hidden sm:inline text-sm font-medium whitespace-nowrap">Manual Controls</span>
         </button>
       </div>
 
