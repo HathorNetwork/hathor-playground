@@ -25,13 +25,11 @@ export const PreviewPanel: React.FC = () => {
 
   // Load sandbox URL for active project if missing
   useEffect(() => {
-    if (!activeProjectId || storedSandboxUrl) {
-      setError(null);
+    if (!activeProjectId) {
       return;
     }
 
     const loadSandbox = async () => {
-      setIsLoading(true);
       setError(null);
 
       try {
@@ -50,12 +48,13 @@ export const PreviewPanel: React.FC = () => {
       } catch (err) {
         console.error('Failed to load sandbox:', err);
         setError(err instanceof Error ? err.message : 'Failed to load preview');
-      } finally {
-        setIsLoading(false);
       }
     };
 
-    loadSandbox();
+    if (!storedSandboxUrl) {
+      setIsLoading(true);
+      loadSandbox().finally(() => setIsLoading(false));
+    }
   }, [activeProjectId, storedSandboxUrl, setSandboxUrl]);
 
   // Subscribe to sandbox events (SSE) for real-time URL updates
@@ -64,32 +63,30 @@ export const PreviewPanel: React.FC = () => {
       return;
     }
 
-    const eventSource = new EventSource(`/api/beam/sandbox/${activeProjectId}/events`);
+    const events = new EventSource(`/api/beam/sandbox/${activeProjectId}/events`);
 
-    eventSource.onmessage = (event) => {
+    events.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
 
         if (data.type === 'sandbox_ready' || data.type === 'sandbox_updated') {
-          console.log('Sandbox URL updated:', data.url);
           setSandboxUrl(activeProjectId, data.url);
           setError(null);
         } else if (data.type === 'sandbox_removed') {
-          console.log('Sandbox removed');
           setSandboxUrl(activeProjectId, null);
         }
       } catch (err) {
-        console.error('Failed to parse SSE event:', err);
+        console.error('Failed to parse sandbox event:', err);
       }
     };
 
-    eventSource.onerror = (err) => {
-      console.error('SSE connection error:', err);
-      eventSource.close();
+    events.onerror = (err) => {
+      console.warn('Sandbox event stream error:', err);
+      events.close();
     };
 
     return () => {
-      eventSource.close();
+      events.close();
     };
   }, [activeProjectId, setSandboxUrl]);
 

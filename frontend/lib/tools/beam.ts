@@ -117,6 +117,46 @@ async function runCommand(command: string): Promise<ToolResult> {
   }
 }
 
+async function purgeSandbox(): Promise<ToolResult> {
+  try {
+    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+
+    if (!activeProjectId) {
+      return {
+        success: false,
+        message: 'No active project',
+        error: 'Select or create a project first',
+      };
+    }
+
+    addConsoleMessage?.('warning', '🧹 Purging sandbox /app directory...');
+
+    const purgeResult = await runCommand('find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +');
+    if (!purgeResult.success) {
+      return {
+        success: false,
+        message: '❌ Failed to purge sandbox files',
+        error: purgeResult.error || purgeResult.message,
+      };
+    }
+
+    setSandboxUrl(activeProjectId, null);
+    addConsoleMessage?.('success', '✅ Sandbox files removed. Re-deploy to recreate the app.');
+
+    return {
+      success: true,
+      message: 'Sandbox purged successfully',
+      data: {},
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: '❌ Failed to purge sandbox',
+      error: String(error),
+    };
+  }
+}
+
 async function createHathorDapp(
   appName?: string,
   walletConnectId?: string,
@@ -196,6 +236,28 @@ async function createHathorDapp(
       };
     }
 
+  // Move generated files into /app root so BEAM dev server sees package.json at /app/package.json
+  const moveResult = await runCommand(
+    `cd /app && cp -a ${resolvedAppName}/. ./ && rm -rf ${resolvedAppName}`,
+  );
+  if (!moveResult.success) {
+    return {
+      success: false,
+      message: `❌ Failed to flatten dApp directory`,
+      error: moveResult.error || 'Could not move scaffolded files to /app',
+    };
+  }
+
+  // Ensure package.json now exists directly under /app
+  const verifyRootPackage = await runCommand(`cd /app && ls -la package.json 2>/dev/null || echo "missing"`);
+  if (verifyRootPackage.data?.stdout?.includes('missing')) {
+    return {
+      success: false,
+      message: '❌ package.json not found at /app after moving files',
+      error: 'Flattening step failed; dev server cannot run',
+    };
+  }
+
     const nextSteps = [
       `✅ Scaffolded with create-hathor-dapp in /app/${resolvedAppName}`,
       `🔄 Run sync_dapp() to sync files back to IDE`,
@@ -255,7 +317,7 @@ async function deployDApp(): Promise<ToolResult> {
     let syncResult: ToolResult | null = null;
     try {
       const { syncDApp } = await import('./sync');
-      syncResult = await syncDApp('ide-to-sandbox');
+      syncResult = await syncDApp('ide-to-sandbox', undefined, { forceFullUpload: true });
       if (!syncResult.success) {
         console.warn('File sync failed during deployment, continuing anyway:', syncResult.error);
         addConsoleMessage?.('warning', '⚠️ File sync failed, but continuing with deployment');
@@ -305,7 +367,21 @@ async function deployDApp(): Promise<ToolResult> {
   }
 }
 
-async function uploadFiles(paths: string[]): Promise<ToolResult> {
+type UploadInput = string | string[] | Record<string, string>;
+
+function normalizePath(path: string): string {
+  if (!path.startsWith('/')) {
+    return `/dapp/${path.replace(/^\/+/, '')}`;
+  }
+
+  if (path.startsWith('/dapp/') || path.startsWith('/app/')) {
+    return path;
+  }
+
+  return `/dapp${path}`;
+}
+
+async function uploadFiles(input: UploadInput): Promise<ToolResult> {
   try {
     const { files, activeProjectId, addConsoleMessage } = useIDEStore.getState();
 
@@ -317,30 +393,63 @@ async function uploadFiles(paths: string[]): Promise<ToolResult> {
       };
     }
 
-    const filesToUpload = files.filter((f) => paths.includes(f.path));
+    const filesMap: Record<string, string> = {};
 
-    if (filesToUpload.length === 0) {
+    if (typeof input === 'string') {
+      input = [input];
+    }
+
+    if (Array.isArray(input)) {
+      const normalizedPaths = Array.from(
+        new Set(
+          input
+            .map((path) => normalizePath(path.trim()))
+            .filter((path) => path.length > 1),
+        ),
+      );
+
+      const filesToUpload = files.filter((f) => normalizedPaths.includes(f.path));
+
+      if (filesToUpload.length === 0) {
+        return {
+          success: false,
+          message: `No files found for paths: ${normalizedPaths.join(', ')}`,
+          error: 'Check file paths under /dapp/',
+        };
+      }
+
+      filesToUpload.forEach((f) => {
+        filesMap[f.path] = f.content;
+      });
+    } else if (input && typeof input === 'object') {
+      for (const [rawPath, rawContent] of Object.entries(input)) {
+        const normalizedPath = normalizePath(rawPath);
+        if (typeof rawContent === 'string') {
+          filesMap[normalizedPath] = rawContent;
+        } else if (rawContent !== undefined && rawContent !== null) {
+          filesMap[normalizedPath] = String(rawContent);
+        }
+      }
+    }
+
+    if (Object.keys(filesMap).length === 0) {
       return {
         success: false,
-        message: `No files found for paths: ${paths.join(', ')}`,
-        error: 'Check file paths',
+        message: 'No files to upload',
+        error: 'Provide at least one valid file path or { path: content } entry',
       };
     }
 
-    const filesMap: Record<string, string> = {};
-    filesToUpload.forEach((f) => {
-      filesMap[f.path] = f.content;
-    });
-
-    addConsoleMessage?.('info', `📤 Uploading ${filesToUpload.length} files to sandbox...`);
+    const uploadCount = Object.keys(filesMap).length;
+    addConsoleMessage?.('info', `📤 Uploading ${uploadCount} file(s) to sandbox...`);
 
     await beamClient.uploadFiles(activeProjectId, filesMap);
 
     return {
       success: true,
-      message: `✅ Uploaded ${filesToUpload.length} files to sandbox`,
+      message: `✅ Uploaded ${uploadCount} file(s) to sandbox`,
       data: {
-        files: filesToUpload.map((f) => f.path),
+        files: Object.keys(filesMap),
       },
     };
   } catch (error) {
@@ -406,9 +515,25 @@ async function restartDevServer(): Promise<ToolResult> {
       };
     }
 
+    addConsoleMessage?.('info', '🔄 Syncing files before restart...');
+
+    try {
+      const { syncDApp } = await import('./sync');
+      const syncResult = await syncDApp('ide-to-sandbox', undefined, { forceFullUpload: true });
+      if (!syncResult.success) {
+        addConsoleMessage?.('warning', `⚠️ Sync failed: ${syncResult.error || syncResult.message}`);
+      }
+    } catch (syncError) {
+      addConsoleMessage?.('warning', `⚠️ Sync error before restart: ${String(syncError)}`);
+    }
+
     addConsoleMessage?.('info', '🔄 Restarting dev server...');
 
     const result = await beamClient.startDevServer(activeProjectId);
+
+    result.logs?.forEach((line: string) => {
+      addConsoleMessage?.('info', line);
+    });
 
     if (result.url) {
       setSandboxUrl(activeProjectId, result.url);
@@ -424,6 +549,49 @@ async function restartDevServer(): Promise<ToolResult> {
     return {
       success: false,
       message: '❌ Failed to restart dev server',
+      error: String(error),
+    };
+  }
+}
+
+async function stopDevServer(): Promise<ToolResult> {
+  try {
+    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+
+    if (!activeProjectId) {
+      return {
+        success: false,
+        message: 'No active project',
+        error: 'Select or create a project first',
+      };
+    }
+
+    addConsoleMessage?.('info', '🛑 Stopping dev server...');
+
+    const result = await beamClient.stopDevServer(activeProjectId);
+
+    if (result.status === 'stopped') {
+      setSandboxUrl(activeProjectId, null);
+      if (activeLogStream) {
+        activeLogStream.close();
+        activeLogStream = null;
+      }
+      return {
+        success: true,
+        message: '✅ Dev server stopped',
+        data: result,
+      };
+    }
+
+    return {
+      success: true,
+      message: 'ℹ️ Dev server was not running',
+      data: result,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: '❌ Failed to stop dev server',
       error: String(error),
     };
   }
@@ -754,14 +922,114 @@ async function getSandboxLogs(lines: number = 50): Promise<ToolResult> {
   }
 }
 
+async function getSandboxStatus(): Promise<ToolResult> {
+  try {
+    const { activeProjectId } = useIDEStore.getState();
+
+    if (!activeProjectId) {
+      return {
+        success: false,
+        message: 'No active project',
+        error: 'Select or create a project first',
+      };
+    }
+
+    const sandbox = await beamClient.getSandbox(activeProjectId);
+
+    if (!sandbox) {
+      return {
+        success: false,
+        message: 'No sandbox found for this project',
+        error: 'Create or deploy to a sandbox first',
+      };
+    }
+
+    return {
+      success: true,
+      message: sandbox.dev_server_running ? 'Dev server running' : 'Dev server stopped',
+      data: sandbox,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: '❌ Failed to get sandbox status',
+      error: String(error),
+    };
+  }
+}
+
+async function terminateSandbox(): Promise<ToolResult> {
+  try {
+    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+
+    if (!activeProjectId) {
+      return {
+        success: false,
+        message: 'No active project',
+        error: 'Select or create a project first',
+      };
+    }
+
+    addConsoleMessage?.('warning', '⚠️ Terminating sandbox...');
+    const result = await beamClient.terminateSandbox(activeProjectId);
+    setSandboxUrl(activeProjectId, null);
+    if (activeLogStream) {
+      activeLogStream.close();
+      activeLogStream = null;
+    }
+
+    return {
+      success: true,
+      message: '🗑️ Sandbox terminated and reset',
+      data: result,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: '❌ Failed to terminate sandbox',
+      error: String(error),
+    };
+  }
+}
+
+async function runHeavyTask(command: string, cwd?: string): Promise<ToolResult> {
+  try {
+    if (!command || !command.trim()) {
+      return {
+        success: false,
+        message: 'Command required',
+        error: 'Provide a shell command to run inside the pod',
+      };
+    }
+
+    const result = await beamClient.runHeavyTask(command, cwd);
+    return {
+      success: true,
+      message: `🚀 Pod task completed${result.url ? `\nURL: ${result.url}` : ''}`,
+      data: result,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: '❌ Heavy task failed',
+      error: String(error),
+    };
+  }
+}
+
 export const beamTools = {
   createHathorDapp,
   deployDApp,
   uploadFiles,
   getSandboxUrl,
   restartDevServer,
+  stopDevServer,
+  getSandboxStatus,
+  terminateSandbox,
   bootstrapNextJS,
   runCommand,
+  runHeavyTask,
+  purgeSandbox,
   readSandboxFiles,
   getSandboxLogs,
 };

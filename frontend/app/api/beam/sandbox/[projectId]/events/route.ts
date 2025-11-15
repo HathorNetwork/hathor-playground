@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
+import { beamService } from '@/lib/services/beam-service';
 
 /**
  * GET /api/beam/sandbox/[projectId]/events
- * Stream sandbox state change events using Server-Sent Events (SSE)
+ * Local SSE endpoint that polls sandbox status and emits updates
  */
 export async function GET(
   req: NextRequest,
@@ -14,44 +15,57 @@ export async function GET(
     return new Response('projectId is required', { status: 400 });
   }
 
-  const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
   try {
-    // Fetch from backend SSE endpoint
-    const response = await fetch(`${backendUrl}/api/beam/sandbox/${projectId}/events`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'text/event-stream',
-      },
-    });
-
-    if (!response.ok) {
-      return new Response(`Failed to connect to event stream: ${response.statusText}`, {
-        status: response.status,
-      });
-    }
-
-    // Create a ReadableStream to forward the SSE events
     const stream = new ReadableStream({
       async start(controller) {
-        const reader = response.body?.getReader();
-        if (!reader) {
-          controller.close();
-          return;
-        }
+        const encoder = new TextEncoder();
+        let previousUrl: string | null = null;
 
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
+        const send = (event: string, data: any) => {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: event,
+                ...data,
+              })}\n\n`,
+            ),
+          );
+        };
+
+        const pushStatus = async () => {
+          try {
+            const info = await beamService.getSandboxInfo(projectId);
+            const currentUrl = info?.url || null;
+
+            if (currentUrl && currentUrl !== previousUrl) {
+              send('sandbox_ready', { url: currentUrl });
+              previousUrl = currentUrl;
+            } else if (!currentUrl && previousUrl) {
+              send('sandbox_removed', {});
+              previousUrl = null;
+            } else {
+              send('sandbox_ping', { url: currentUrl });
+            }
+          } catch (error: any) {
+            send('sandbox_error', { message: error.message || 'Failed to inspect sandbox' });
           }
-        } catch (error) {
-          console.error('Error streaming events:', error);
-          controller.error(error);
-        } finally {
-          controller.close();
-        }
+        };
+
+        // Push initial status immediately
+        await pushStatus();
+
+        const interval = setInterval(pushStatus, 5000);
+
+        const abortHandler = () => {
+          clearInterval(interval);
+          try {
+            controller.close();
+          } catch {
+            // ignore
+          }
+        };
+
+        req.signal.addEventListener('abort', abortHandler);
       },
     });
 

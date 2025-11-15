@@ -487,7 +487,9 @@ json.dumps(result)
     }
 
     try {
-      const { method_name, args, caller_address, code, actions } = request;
+      const { method_name, caller_address, code, actions } = request;
+      const args = request.args ?? [];
+      const kwargs = request.kwargs ?? {};
       let { contract_id } = request;
 
       // Check if this is an initialize call (uses blueprint_id) or method call (uses contract_id)
@@ -518,7 +520,7 @@ try:
         context = _create_context(caller_address='${caller_address}', actions=actions_list)
 
         # Convert arguments and kwargs from JSON to Python objects
-        args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(request.kwargs)}''')
+        args, kwargs = _convert_frontend_args('''${JSON.stringify(args)}''', '''${JSON.stringify(kwargs)}''')
 
         method_name = '${method_name}'
         method_type = '${methodType}'

@@ -2,13 +2,33 @@
  * BEAM Cloud service for managing dApp sandboxes using TypeScript SDK
  */
 
-import { Sandbox, Image, beamOpts } from '@beamcloud/beam-js';
+import { Sandbox, Image, beamOpts, Pod, TaskPolicy } from '@beamcloud/beam-js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { exec as execCallback } from 'child_process';
+import { promisify } from 'util';
+
+const exec = promisify(execCallback);
+const fsp = fs.promises;
 
 const DEFAULT_CODE_PATH = '/app';
 const DEFAULT_PORT = 3000;
+
+const baseImagePromise: Promise<Image> = (async () => {
+  configureBEAM();
+  const image = new Image({
+    baseImage: 'node:20',
+    commands: [
+      'apt-get update && apt-get install -y git curl',
+      'npm install -g pnpm',
+      'mkdir -p /app',
+      'chmod 755 /app',
+    ],
+  });
+  await image.build();
+  return image;
+})();
 
 /**
  * Configure BEAM SDK with environment variables
@@ -36,6 +56,7 @@ export interface SandboxInfo {
   url: string;
   sandbox_id: string;
   project_id: string;
+  dev_server_running?: boolean;
 }
 
 export interface UploadResult {
@@ -74,6 +95,229 @@ export class BeamService {
     globalForBeam.beamProcesses = this.processes;
     globalForBeam.beamBuildLogs = this.buildLogs;
     globalForBeam.beamBuildInProgress = this.buildInProgress;
+  }
+
+  private async ensureSandboxInstance(projectId: string) {
+    let instance = this.sandboxes.get(projectId);
+    if (!instance) {
+      await this.createSandbox(projectId);
+      instance = this.sandboxes.get(projectId);
+    }
+
+    if (!instance) {
+      throw new Error('Failed to create sandbox for project ' + projectId);
+    }
+
+    return instance;
+  }
+
+  private async ensureLiveSandbox(projectId: string) {
+    let instance = await this.ensureSandboxInstance(projectId);
+    try {
+      await instance.fs.statFile('/');
+      return instance;
+    } catch {
+      console.warn('Cached sandbox is dead/stale, recreating for:', projectId);
+      this.invalidateSandbox(projectId);
+      await this.createSandbox(projectId);
+      instance = this.sandboxes.get(projectId);
+      if (!instance) {
+        throw new Error('Failed to recreate sandbox for project ' + projectId);
+      }
+      return instance;
+    }
+  }
+
+  private invalidateSandbox(projectId: string) {
+    this.sandboxes.delete(projectId);
+    this.urls.delete(projectId);
+    this.processes.delete(projectId);
+  }
+
+  private getSandboxId(instance: any, projectId: string) {
+    if (!instance) {
+      return `sandbox-${projectId}`;
+    }
+    if (typeof instance.sandboxId === 'function') {
+      try {
+        const id = instance.sandboxId();
+        if (id) return id;
+      } catch {
+        // fall through
+      }
+    }
+    return instance.id || `sandbox-${projectId}`;
+  }
+
+  private async isDevServerRunning(projectId: string): Promise<boolean> {
+    const process = this.processes.get(projectId);
+    if (!process) {
+      return false;
+    }
+
+    if (typeof process.status === 'function') {
+      try {
+        const [exitCode, status] = await process.status();
+        if (typeof status === 'string') {
+          const running = status.toLowerCase() === 'running';
+          if (!running) {
+            this.processes.delete(projectId);
+          }
+          return running;
+        }
+
+        if (typeof exitCode === 'number' && exitCode >= 0) {
+          this.processes.delete(projectId);
+          return false;
+        }
+      } catch (error) {
+        console.warn('[DEV_SERVER] status() failed, assuming process ended:', error);
+        this.processes.delete(projectId);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private shouldSkipPath(sandboxPath: string) {
+    return (
+      sandboxPath.includes('/node_modules/') ||
+      sandboxPath.includes('/.git/') ||
+      sandboxPath.includes('/.next/') ||
+      sandboxPath.includes('/.cache/') ||
+      sandboxPath.includes('/.npm/') ||
+      sandboxPath.includes('/.yarn/') ||
+      sandboxPath.includes('/dist/') ||
+      sandboxPath.includes('/build/') ||
+      sandboxPath.endsWith('.DS_Store') ||
+      (sandboxPath.includes('/logs/') && sandboxPath.endsWith('.log'))
+    );
+  }
+
+  private async collectSandboxFiles(
+    instance: any,
+    remotePath: string,
+    files: Array<{ path: string; content: Buffer }>,
+  ) {
+    let entries: Array<{ name: string; isDir: boolean }> = [];
+    try {
+      entries = await instance.fs.listFiles(remotePath);
+    } catch (error: any) {
+      console.warn(`[DOWNLOAD] Failed to list ${remotePath}:`, error?.message || error);
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryName = entry.name;
+      if (!entryName || entryName === '.' || entryName === '..') continue;
+      const fullPath = path.posix.join(remotePath, entryName);
+
+      if (entry.isDir) {
+        if (this.shouldSkipPath(fullPath + '/')) {
+          continue;
+        }
+        await this.collectSandboxFiles(instance, fullPath, files);
+        continue;
+      }
+
+      if (this.shouldSkipPath(fullPath)) {
+        continue;
+      }
+
+      try {
+        const tmpFile = path.join(
+          os.tmpdir(),
+          'beam-download-' + Date.now() + '-' + path.basename(fullPath),
+        );
+        await instance.fs.downloadFile(fullPath, tmpFile);
+        const content = fs.readFileSync(tmpFile);
+        const frontendPath = fullPath.replace(DEFAULT_CODE_PATH + '/', '/dapp/');
+        files.push({ path: frontendPath, content });
+        fs.unlinkSync(tmpFile);
+      } catch (error: any) {
+        console.warn(`[DOWNLOAD] Failed to download ${fullPath}:`, error?.message || error);
+      }
+    }
+  }
+
+  private sanitizeArchivePath(filePath: string) {
+    const normalized = filePath.replace(/^\/+/, '');
+    return normalized.replace(/\.\./g, '');
+  }
+
+  private async createArchiveFromFiles(files: Record<string, string>) {
+    const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'beam-sync-'));
+    const stagingDir = path.join(tempRoot, 'payload');
+    await fsp.mkdir(stagingDir, { recursive: true });
+
+    for (const [sandboxPath, content] of Object.entries(files)) {
+      const relativePath = this.sanitizeArchivePath(sandboxPath);
+      const targetPath = path.join(stagingDir, relativePath);
+      await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+      await fsp.writeFile(targetPath, content, 'utf-8');
+    }
+
+    const archivePath = path.join(tempRoot, 'upload.tgz');
+    await exec(`cd "${stagingDir}" && tar -czf "${archivePath}" .`);
+
+    return {
+      archivePath,
+      cleanup: () => fsp.rm(tempRoot, { recursive: true, force: true }),
+    };
+  }
+
+  private async uploadFilesIndividually(
+    instance: any,
+    files: Record<string, string>,
+  ) {
+    for (const [filePath, content] of Object.entries(files)) {
+      let sandboxPath = filePath;
+      if (sandboxPath.startsWith('/dapp/')) {
+        sandboxPath = sandboxPath.replace('/dapp/', DEFAULT_CODE_PATH + '/');
+      } else if (!sandboxPath.startsWith(DEFAULT_CODE_PATH)) {
+        sandboxPath = DEFAULT_CODE_PATH + sandboxPath;
+      }
+
+      const parentDir = path.dirname(sandboxPath);
+      try {
+        await instance.fs.statFile(parentDir);
+      } catch {
+        await instance.exec('mkdir', '-p', parentDir);
+      }
+
+      const tmpFile = path.join(
+        os.tmpdir(),
+        'beam-upload-' + Date.now() + '-' + path.basename(filePath),
+      );
+      fs.writeFileSync(tmpFile, content);
+
+      try {
+        await instance.fs.uploadFile(tmpFile, sandboxPath);
+        console.log('Uploaded:', sandboxPath);
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    }
+  }
+
+  private async uploadFilesWithArchive(
+    instance: any,
+    files: Record<string, string>,
+  ) {
+    const { archivePath, cleanup } = await this.createArchiveFromFiles(files);
+    try {
+      const remoteArchive = '/tmp/dapp-upload.tgz';
+      await instance.fs.uploadFile(archivePath, remoteArchive);
+      const extractProc = await instance.exec(
+        'sh',
+        '-c',
+        `tar -xzf ${remoteArchive} -C / && rm ${remoteArchive}`,
+      );
+      await extractProc.wait();
+    } finally {
+      await cleanup();
+    }
   }
 
   /**
@@ -127,16 +371,7 @@ export class BeamService {
     this.buildLogs.set(projectId, ['Starting sandbox creation...', 'Building Docker image...']);
     this.buildInProgress.set(projectId, true);
 
-    const image = new Image({
-      baseImage: 'node:20',
-      commands: [
-        'apt-get update && apt-get install -y git curl',
-        'npm install -g pnpm',
-        'mkdir -p /app',
-        'chmod 755 /app',
-      ],
-    });
-
+    const image = await baseImagePromise;
     const sandbox = new Sandbox({
       name: 'hathor-dapp-' + projectId,
       cpu: 1,
@@ -151,7 +386,7 @@ export class BeamService {
     });
 
     const url = await instance.exposePort(DEFAULT_PORT);
-    const sandboxId = instance.id || 'sandbox-' + Date.now();
+    const sandboxId = this.getSandboxId(instance, projectId);
 
     this.sandboxes.set(projectId, instance);
     this.urls.set(projectId, url);
@@ -162,7 +397,7 @@ export class BeamService {
     logs.push('✓ Port exposed: ' + url);
     this.buildLogs.set(projectId, logs);
 
-    return { url, sandbox_id: sandboxId, project_id: projectId };
+    return { url, sandbox_id: sandboxId, project_id: projectId, dev_server_running: this.processes.has(projectId) };
   }
 
   async getSandbox(projectId: string): Promise<any | null> {
@@ -187,10 +422,13 @@ export class BeamService {
     const url = this.urls.get(projectId);
     if (!url) return null;
 
+    const running = await this.isDevServerRunning(projectId);
+
     return {
-      sandbox_id: instance.id || 'sandbox-' + projectId,
+      sandbox_id: this.getSandboxId(instance, projectId),
       url,
       project_id: projectId,
+      dev_server_running: running,
     };
   }
 
@@ -200,73 +438,17 @@ export class BeamService {
     autoStart: boolean = true
   ): Promise<UploadResult> {
     console.log('[UPLOAD] =================== uploadFiles called for:', projectId);
-    let instance = await this.getSandbox(projectId);
-
-    if (!instance) {
-      console.log('No existing sandbox, creating new one for:', projectId);
-      await this.createSandbox(projectId);
-      // After creating, get directly from Map without TTL check
-      instance = this.sandboxes.get(projectId);
-      // Give newly created sandbox time to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    if (!instance) {
-      throw new Error('Could not get or create sandbox for project ' + projectId);
-    }
+    let instance = await this.ensureLiveSandbox(projectId);
 
     console.log('Uploading', Object.keys(files).length, 'files to sandbox:', projectId);
 
-    // Test if sandbox is still alive by doing a quick operation
-    try {
-      await instance.fs.statFile('/');
-    } catch (testError) {
-      console.warn('Cached sandbox is dead/stale, recreating for:', projectId);
-      // Remove stale instance
-      this.sandboxes.delete(projectId);
-      this.urls.delete(projectId);
-      this.processes.delete(projectId);
-      // Create fresh sandbox
-      await this.createSandbox(projectId);
-      instance = this.sandboxes.get(projectId);
-      if (!instance) {
-        throw new Error('Failed to recreate sandbox for project ' + projectId);
-      }
-      // Give new sandbox time to be ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    for (const [filePath, content] of Object.entries(files)) {
-      let sandboxPath = filePath;
-      if (sandboxPath.startsWith('/dapp/')) {
-        sandboxPath = sandboxPath.replace('/dapp/', DEFAULT_CODE_PATH + '/');
-      } else if (!sandboxPath.startsWith(DEFAULT_CODE_PATH)) {
-        sandboxPath = DEFAULT_CODE_PATH + sandboxPath;
-      }
-
-      const parentDir = path.dirname(sandboxPath);
+    if (Object.keys(files).length > 0) {
+      console.log('Creating archive for', Object.keys(files).length, 'files');
       try {
-        await instance.fs.statFile(parentDir);
-      } catch (statError) {
-        try {
-          await instance.exec('mkdir', '-p', parentDir);
-        } catch (mkdirError) {
-          console.error('Failed to create directory:', parentDir, mkdirError);
-          throw mkdirError;
-        }
-      }
-
-      const tmpFile = path.join(os.tmpdir(), 'beam-upload-' + Date.now() + '-' + path.basename(filePath));
-      fs.writeFileSync(tmpFile, content);
-
-      try {
-        await instance.fs.uploadFile(tmpFile, sandboxPath);
-        console.log('Uploaded:', sandboxPath);
-      } catch (uploadError) {
-        console.error('Failed to upload file:', sandboxPath, uploadError);
-        throw uploadError;
-      } finally {
-        fs.unlinkSync(tmpFile);
+        await this.uploadFilesWithArchive(instance, files);
+      } catch (archiveError) {
+        console.warn('Archive upload failed, falling back to per-file upload:', archiveError);
+        await this.uploadFilesIndividually(instance, files);
       }
     }
 
@@ -285,118 +467,142 @@ export class BeamService {
     };
   }
 
-  async startDevServer(projectId: string): Promise<{ status: string; url: string }> {
-    console.log('[START_DEV] =================== startDevServer called for:', projectId);
-    let instance = await this.getSandbox(projectId);
+  async startDevServer(projectId: string): Promise<{ status: string; url: string; logs: string[] }> {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
 
-    if (!instance) {
-      console.log('No existing sandbox, creating new one for:', projectId);
-      await this.createSandbox(projectId);
-      // After creating, get directly from Map without TTL check
-      instance = this.sandboxes.get(projectId);
-      // Give newly created sandbox time to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+    const capture = (...args: any[]) => {
+      const message = args.map(arg => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' ');
+      logs.push(message);
+      originalLog(...args);
+    };
 
-    if (!instance) {
-      throw new Error('Could not get or create sandbox for project ' + projectId);
-    }
+    console.log = capture;
+    console.warn = capture;
+    console.error = capture;
 
-    console.log('Testing if sandbox is alive for dev server:', projectId);
-
-    // Test if sandbox is still alive by doing a quick operation
     try {
-      await instance.fs.statFile('/');
-    } catch (testError) {
-      console.warn('Cached sandbox is dead/stale, recreating for dev server:', projectId);
-      // Remove stale instance
-      this.sandboxes.delete(projectId);
-      this.urls.delete(projectId);
-      this.processes.delete(projectId);
-      // Create fresh sandbox
-      await this.createSandbox(projectId);
-      instance = this.sandboxes.get(projectId);
-      if (!instance) {
-        throw new Error('Failed to recreate sandbox for project ' + projectId);
+      console.log('[START_DEV] =================== startDevServer called for:', projectId);
+      let instance = await this.ensureLiveSandbox(projectId);
+
+      let projectRoot = DEFAULT_CODE_PATH;
+      try {
+        await instance.fs.statFile(DEFAULT_CODE_PATH + '/package.json');
+        projectRoot = DEFAULT_CODE_PATH;
+      } catch {
+        const findProc = await instance.exec('sh', '-c', `find ${DEFAULT_CODE_PATH} -maxdepth 2 -name package.json | head -n 1 | xargs dirname`);
+        await findProc.wait();
+        const detected = (await findProc.stdout.read())?.trim();
+        if (detected) {
+          projectRoot = detected;
+          console.log('Detected project root at', projectRoot);
+        } else {
+          console.log('No package.json found under /app; dev server may fail to start');
+        }
       }
-      // Give new sandbox time to be ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        const installCmd = `cd ${projectRoot} && pnpm install`;
+        const installProc = await instance.exec('sh', '-c', installCmd);
+        await installProc.wait();
+      } catch {
+        console.log('Dependency install skipped/failed (no package.json yet?)');
+      }
+
+      const devCmd = `cd ${projectRoot} && npx next dev --port ${DEFAULT_PORT}`;
+      console.log('Starting dev server with command:', devCmd);
+      const process = await instance.exec('sh', '-c', devCmd);
+      this.processes.set(projectId, process);
+
+      const url = this.urls.get(projectId);
+      if (!url) throw new Error('Sandbox URL not found');
+
+      console.log('Dev server exposed at:', url);
+
+      return { status: 'success', url, logs };
+    } catch (error) {
+      console.error('Failed to start dev server:', error);
+      throw error;
+    } finally {
+      console.log = originalLog;
+      console.warn = originalWarn;
+      console.error = originalError;
+    }
+  }
+
+  async stopDevServer(projectId: string): Promise<{ status: string }> {
+    const process = this.processes.get(projectId);
+    if (!process) {
+      return { status: 'not_running' };
     }
 
-    // Determine project root: prefer /app, otherwise first subdir with package.json (e.g., /app/hathor-dapp)
-    let projectRoot = DEFAULT_CODE_PATH;
     try {
-      await instance.fs.statFile(DEFAULT_CODE_PATH + '/package.json');
-      projectRoot = DEFAULT_CODE_PATH;
-    } catch {
-      // Find first package.json within depth 2
-      const findProc = await instance.exec('sh', '-c', `find ${DEFAULT_CODE_PATH} -maxdepth 2 -name package.json | head -n 1 | xargs dirname`);
-      await findProc.wait();
-      const detected = (await findProc.stdout.read())?.trim();
-      if (detected) {
-        projectRoot = detected;
-        console.log('Detected project root at', projectRoot);
+      if (typeof process.kill === 'function') {
+        await process.kill();
+      } else if (typeof process.terminate === 'function') {
+        await process.terminate();
       } else {
-        console.log('No package.json found under /app; dev server may fail to start');
+        await this.runCommand(projectId, `pkill -f "next dev --port ${DEFAULT_PORT}"`);
       }
+    } catch (error: any) {
+      console.warn('Failed to stop dev server process:', error);
+      throw new Error(error?.message || 'Failed to stop dev server process');
+    } finally {
+      this.processes.delete(projectId);
     }
 
-    // Install deps and start dev server (projectRoot should exist since /app is created during setup)
+    return { status: 'stopped' };
+  }
+
+  async terminateSandbox(projectId: string): Promise<{ status: string }> {
+    const instance = this.sandboxes.get(projectId);
+    if (!instance) {
+      return { status: 'not_found' };
+    }
+
     try {
-      const installCmd = `cd ${projectRoot} && pnpm install`;
-      const installProc = await instance.exec('sh', '-c', installCmd);
-      await installProc.wait();
-    } catch {
-      console.log('Dependency install skipped/failed (no package.json yet?)');
+      if (typeof instance.terminate === 'function') {
+        await instance.terminate();
+      } else {
+        // Fallback: stop dev server and invalidate maps
+        await this.stopDevServer(projectId);
+      }
+    } finally {
+      this.invalidateSandbox(projectId);
     }
 
-    const devCmd = `cd ${projectRoot} && npx next dev --port ${DEFAULT_PORT}`;
-    const process = await instance.exec('sh', '-c', devCmd);
-    this.processes.set(projectId, process);
+    return { status: 'terminated' };
+  }
 
-    const url = this.urls.get(projectId);
-    if (!url) throw new Error('Sandbox URL not found');
+  async runHeavyTask(command: string, cwd: string = DEFAULT_CODE_PATH): Promise<{ output: string; url?: string }> {
+    configureBEAM();
+    const image = await baseImagePromise;
+    const pod = new Pod({
+      name: `hathor-heavy-${Date.now()}`,
+      cpu: 2,
+      memory: '2Gi',
+      image,
+      taskPolicy: new TaskPolicy({
+        timeout: 900,
+        maxRetries: 0,
+      }),
+    });
 
-    return { status: 'success', url };
+    const entrypoint = ['sh', '-c', `cd ${cwd} && ${command}`];
+    const result = await pod.create(entrypoint);
+    const output = Array.isArray(result.logs) ? result.logs.join('\n') : result.logs || '';
+
+    return {
+      output,
+      url: result.url,
+    };
   }
 
   async runCommand(projectId: string, command: string) {
     console.log('[RUN_COMMAND] =================== runCommand called for:', projectId);
-    let instance = await this.getSandbox(projectId);
-
-    if (!instance) {
-      console.log('No existing sandbox, creating new one for:', projectId);
-      await this.createSandbox(projectId);
-      // After creating, get directly from Map without TTL check
-      instance = this.sandboxes.get(projectId);
-      // Give newly created sandbox time to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    if (!instance) {
-      throw new Error('Could not get or create sandbox for project ' + projectId);
-    }
-
-    console.log('Testing if sandbox is alive for command:', projectId);
-
-    // Test if sandbox is still alive by doing a quick operation
-    try {
-      await instance.fs.statFile('/');
-    } catch (testError) {
-      console.warn('Cached sandbox is dead/stale, recreating for command:', projectId);
-      // Remove stale instance
-      this.sandboxes.delete(projectId);
-      this.urls.delete(projectId);
-      this.processes.delete(projectId);
-      // Create fresh sandbox
-      await this.createSandbox(projectId);
-      instance = this.sandboxes.get(projectId);
-      if (!instance) {
-        throw new Error('Failed to recreate sandbox for project ' + projectId);
-      }
-      // Give new sandbox time to be ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+    let instance = await this.ensureLiveSandbox(projectId);
 
     try {
       // Ensure /app exists (for backward compatibility with existing sandboxes)
@@ -427,100 +633,10 @@ export class BeamService {
 
   async downloadFiles(projectId: string, remotePath: string = DEFAULT_CODE_PATH) {
     console.log('[DOWNLOAD] =================== downloadFiles called for:', projectId);
-    let instance = await this.getSandbox(projectId);
-
-    if (!instance) {
-      console.log('No existing sandbox, creating new one for:', projectId);
-      await this.createSandbox(projectId);
-      // After creating, get directly from Map without TTL check
-      instance = this.sandboxes.get(projectId);
-      // Give newly created sandbox time to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    if (!instance) {
-      throw new Error('Could not get or create sandbox for project ' + projectId);
-    }
-
-    // Note: Skipping stale detection for downloadFiles to avoid losing files created by recent commands
-    // The sync should run on the same sandbox instance that just executed commands
-
+    const instance = await this.ensureLiveSandbox(projectId);
     const files: Array<{ path: string; content: Buffer }> = [];
 
-    // Find all regular files, excluding common large/unnecessary directories
-    const excludePatterns = [
-      'node_modules',
-      '.git',
-      '.next',
-      '.cache',
-      '.npm',
-      '.yarn',
-      'dist',
-      'build',
-    ];
-
-    // Build find command - find all files, exclude common build/dependency directories
-    // Use a simpler approach: find all files first, then filter in JavaScript
-    const findCmd = `find ${remotePath} -type f 2>/dev/null`;
-    console.log(`[DOWNLOAD] Executing find command: ${findCmd}`);
-    const process = await instance.exec('sh', '-c', findCmd);
-    await process.wait();
-    const output = await process.stdout.read();
-    const stderr = await process.stderr.read();
-
-    console.log(`[DOWNLOAD] Find command stdout (first 1000 chars): ${output?.slice(0, 1000)}`);
-    if (stderr && stderr.trim()) {
-      console.log(`[DOWNLOAD] Find command stderr: ${stderr}`);
-    }
-
-    // Filter out excluded directories and files
-    const allPaths = output.split('\n').filter((line: string) => line.trim());
-    const filePaths = allPaths.filter((path: string) => {
-      // Exclude common build/dependency directories
-      if (path.includes('/node_modules/') ||
-          path.includes('/.git/') ||
-          path.includes('/.next/') ||
-          path.includes('/.cache/') ||
-          path.includes('/.npm/') ||
-          path.includes('/.yarn/') ||
-          path.includes('/dist/') ||
-          path.includes('/build/') ||
-          path.includes('.DS_Store') ||
-          (path.endsWith('.log') && path.includes('/logs/'))) {
-        return false;
-      }
-      return true;
-    });
-    
-    console.log(`[DOWNLOAD] Found ${allPaths.length} total paths, ${filePaths.length} after filtering`);
-    console.log(`[DOWNLOAD] Sample file paths:`, filePaths.slice(0, 10));
-
-    for (const sandboxFilePath of filePaths) {
-      if (!sandboxFilePath.trim()) continue;
-
-      // Additional filtering for edge cases and files not in directories
-      if (sandboxFilePath.includes('.DS_Store') ||
-          sandboxFilePath.includes('.log') && sandboxFilePath.includes('/logs/')) {
-        continue;
-      }
-
-      try {
-        const tmpFile = path.join(
-          os.tmpdir(),
-          'beam-download-' + Date.now() + '-' + path.basename(sandboxFilePath),
-        );
-        await instance.fs.downloadFile(sandboxFilePath, tmpFile);
-        const content = fs.readFileSync(tmpFile);
-        const frontendPath = sandboxFilePath.replace(DEFAULT_CODE_PATH + '/', '/dapp/');
-        files.push({ path: frontendPath, content });
-        console.log(
-          `[DOWNLOAD] Successfully downloaded: ${sandboxFilePath} -> ${frontendPath} (${content.length} bytes)`,
-        );
-        fs.unlinkSync(tmpFile);
-      } catch (error: any) {
-        console.warn(`[DOWNLOAD] Failed to download ${sandboxFilePath}:`, error.message);
-      }
-    }
+    await this.collectSandboxFiles(instance, remotePath, files);
 
     console.log(`[DOWNLOAD] Returning ${files.length} files. Keys:`, files.slice(0, 10).map((f) => f.path));
     return files;
@@ -600,14 +716,7 @@ export class BeamService {
    * Ensure git repository exists in sandbox, initialize if needed
    */
   async ensureGitRepo(projectId: string): Promise<void> {
-    let instance = await this.getSandbox(projectId);
-    if (!instance) {
-      await this.createSandbox(projectId);
-      instance = this.sandboxes.get(projectId);
-      if (!instance) {
-        throw new Error('Failed to create sandbox for git operations');
-      }
-    }
+    const instance = await this.ensureLiveSandbox(projectId);
 
     // Check if .git exists
     try {

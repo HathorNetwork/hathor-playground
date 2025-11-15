@@ -3,7 +3,7 @@ import { beamService } from '@/lib/services/beam-service';
 
 /**
  * GET /api/beam/sandbox/[projectId]/logs
- * Stream logs from a BEAM sandbox using Server-Sent Events (SSE) and TypeScript SDK
+ * Stream logs from BEAM sandbox via SSE
  */
 export async function GET(
   req: NextRequest,
@@ -16,20 +16,40 @@ export async function GET(
   }
 
   try {
-    const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
-        try {
-          for await (const logLine of beamService.streamLogs(projectId)) {
-            const data = `data: ${logLine}\n\n`;
-            controller.enqueue(encoder.encode(data));
+        const send = (event: string, data: any) => {
+          controller.enqueue(
+            new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+          );
+        };
+
+        const iterator = beamService.streamLogs(projectId);
+        let aborted = false;
+
+        const abortHandler = () => {
+          aborted = true;
+          try {
+            controller.close();
+          } catch {
+            // no-op
           }
-        } catch (error) {
-          console.error('Error streaming logs:', error);
-          const errorData = `data: ERROR: ${error}\n\n`;
-          controller.enqueue(encoder.encode(errorData));
+        };
+
+        req.signal.addEventListener('abort', abortHandler);
+
+        try {
+          for await (const logChunk of iterator) {
+            if (aborted) break;
+            send('log', { message: logChunk });
+          }
+        } catch (error: any) {
+          send('log_error', { message: error.message || 'Failed to stream logs' });
         } finally {
-          controller.close();
+          req.signal.removeEventListener('abort', abortHandler);
+          if (!aborted) {
+            controller.close();
+          }
         }
       },
     });
@@ -37,8 +57,8 @@ export async function GET(
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
       },
     });

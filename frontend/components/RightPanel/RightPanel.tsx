@@ -1,18 +1,19 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Monitor, Sparkles } from 'lucide-react';
+import { Monitor, Sparkles, Terminal } from 'lucide-react';
 import { PreviewPanel } from '../Preview/PreviewPanel';
 import { AgenticChat } from './AgenticChat';
 import { AgenticChatStreaming } from './AgenticChatStreaming';
 import { AgenticChatUnified } from './AgenticChatUnified';
+import { DAppManualControls } from './DAppManualControls';
 
 // Feature flags
 const USE_STREAMING = true;
 const USE_UNIFIED = true; // New: Use unified architecture (Blueprint + dApp)
 import { clsx } from 'clsx';
 
-type TabType = 'preview' | 'ai';
+type TabType = 'preview' | 'ai' | 'controls';
 
 export const RightPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('preview');
@@ -45,6 +46,18 @@ export const RightPanel: React.FC = () => {
           <Sparkles size={16} />
           <span className="text-sm font-medium">AI Agent</span>
         </button>
+        <button
+          onClick={() => setActiveTab('controls')}
+          className={clsx(
+            'flex items-center gap-2 px-4 py-2 transition-colors border-b-2',
+            activeTab === 'controls'
+              ? 'border-green-500 bg-gray-900 text-white'
+              : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-700'
+          )}
+        >
+          <Terminal size={16} />
+          <span className="text-sm font-medium">Manual Controls</span>
+        </button>
       </div>
 
       {/* Content */}
@@ -55,6 +68,9 @@ export const RightPanel: React.FC = () => {
         </div>
         <div className={clsx('h-full', activeTab === 'ai' ? 'block' : 'hidden')}>
           {USE_UNIFIED ? <AgenticChatUnified /> : USE_STREAMING ? <AgenticChatStreaming /> : <AgenticChat />}
+        </div>
+        <div className={clsx('h-full', activeTab === 'controls' ? 'block' : 'hidden')}>
+          <DAppManualControls />
         </div>
       </div>
     </div>

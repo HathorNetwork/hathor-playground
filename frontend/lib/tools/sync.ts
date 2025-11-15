@@ -57,9 +57,14 @@ function decodeEntryContent(entry: SandboxEntry): string {
   return entry.content;
 }
 
+interface SyncOptions {
+  forceFullUpload?: boolean;
+}
+
 export async function syncDApp(
   direction: SyncDirection = 'bidirectional',
   projectId?: string,
+  options?: SyncOptions,
 ): Promise<ToolResult> {
   try {
     const activeProjectId = projectId || useIDEStore.getState().activeProjectId;
@@ -86,9 +91,9 @@ export async function syncDApp(
     if (direction === 'ide-to-sandbox' || direction === 'bidirectional') {
       const snapshot = getDappFilesSnapshot();
       const filesToUpload =
-        previousManifest && Object.keys(previousManifest).length > 0
-          ? addedOrChanged
-          : snapshot.map((file) => file.path);
+        options?.forceFullUpload || !previousManifest || Object.keys(previousManifest).length === 0
+          ? snapshot.map((file) => file.path)
+          : addedOrChanged;
 
       if (filesToUpload.length > 0) {
         const payload: Record<string, string> = {};

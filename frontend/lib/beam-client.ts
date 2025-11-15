@@ -8,6 +8,7 @@ export interface SandboxInfo {
   url: string;
   sandbox_id: string;
   project_id: string;
+  dev_server_running?: boolean;
 }
 
 export interface UploadResult {
@@ -91,13 +92,61 @@ export class BeamClient {
   /**
    * Start development server in sandbox
    */
-  async startDevServer(projectId: string): Promise<{ status: string; url: string }> {
+  async startDevServer(projectId: string): Promise<{ status: string; url: string; logs?: string[] }> {
     const response = await fetch(`${API_BASE}/sandbox/${projectId}/start`, {
       method: 'POST',
     });
 
     if (!response.ok) {
       throw new Error(`Failed to start dev server: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Stop development server in sandbox
+   */
+  async stopDevServer(projectId: string): Promise<{ status: string }> {
+    const response = await fetch(`${API_BASE}/sandbox/${projectId}/stop`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to stop dev server: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Terminate sandbox
+   */
+  async terminateSandbox(projectId: string): Promise<{ status: string }> {
+    const response = await fetch(`${API_BASE}/sandbox/${projectId}/terminate`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to terminate sandbox: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Run a heavy task using Beam Pod
+   */
+  async runHeavyTask(command: string, cwd?: string): Promise<{ output: string; url?: string }> {
+    const response = await fetch(`${API_BASE}/pod/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command, cwd }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to run heavy task: ${response.statusText} - ${errorText}`);
     }
 
     return response.json();

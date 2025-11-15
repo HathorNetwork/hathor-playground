@@ -13,13 +13,12 @@
 import React, { useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
-import { Sparkles, Send, Loader2, Trash2, Code2, Globe, Square } from 'lucide-react';
+import { Sparkles, Send, Loader2, Trash2, Code2, Globe, Square, Copy } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
 import { blueprintTools, fileTools, beamTools, syncDApp } from '@/lib/tools';
 import { Conversation, ConversationContent, ConversationScrollButton, ConversationEmptyState } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
-import { DAppManualControls } from './DAppManualControls';
 
 export const AgenticChatUnified: React.FC = () => {
   const { activeProjectId, addConsoleMessage } = useIDEStore();
@@ -142,15 +141,18 @@ export const AgenticChatUnified: React.FC = () => {
             break;
 
           case 'get_file_dependencies':
-            result = await fileTools.getFileDependencies(args.filePath);
+            result = await fileTools.getFileDependencies(args.filePath || args.path);
             break;
 
           case 'analyze_component':
-            result = await fileTools.analyzeComponent(args.filePath);
+            result = await fileTools.analyzeComponent(args.filePath || args.path);
             break;
 
           case 'integrate_component':
-            result = await fileTools.integrateComponent(args.componentPath, args.targetPage);
+            result = await fileTools.integrateComponent(
+              args.componentPath || args.filePath || args.path,
+              args.targetPage,
+            );
             break;
 
           // ========== Blueprint Tools ==========
@@ -314,7 +316,7 @@ export const AgenticChatUnified: React.FC = () => {
   // Store functions in refs so they can be accessed in callbacks
   sendMessageRef.current = sendMessage;
 
-  const isLoading = status === 'awaiting-message' || status === 'in-progress';
+  const isLoading = status !== 'idle' && status !== 'ready';
 
   const handleStop = () => {
     console.log('🛑 Stopping AI generation...');
@@ -366,6 +368,63 @@ export const AgenticChatUnified: React.FC = () => {
     }
   };
 
+  const formatMessageForCopy = (message: any) => {
+    const partTexts =
+      message.parts && message.parts.length > 0
+        ? message.parts
+            .map((part: any) => {
+              if (part.type === 'text') {
+                return part.text;
+              }
+              if (part.type && part.type.startsWith('tool-')) {
+                const toolName = part.type.replace('tool-', '');
+                const input = part.input ? JSON.stringify(part.input, null, 2) : '';
+                const output = part.output
+                  ? JSON.stringify(part.output, null, 2)
+                  : part.errorText || '';
+                return [`[Tool: ${toolName}]`, input && `Input:\n${input}`, output && `Output:\n${output}`]
+                  .filter(Boolean)
+                  .join('\n\n');
+              }
+              return typeof part === 'string' ? part : JSON.stringify(part);
+            })
+            .filter(Boolean)
+        : [(message as any).content || ''];
+
+    return partTexts.join('\n\n');
+  };
+
+  const handleCopyChat = async () => {
+    if (!messages.length) {
+      addConsoleMessage('warning', '⚠️ No chat history to copy');
+      return;
+    }
+
+    const transcript = messages
+      .map((message) => {
+        const role = message.role?.toUpperCase() || 'SYSTEM';
+        const content = formatMessageForCopy(message) || '(no content)';
+        return `[${role}]\n${content}`;
+      })
+      .join('\n\n');
+
+    if (!transcript.trim()) {
+      addConsoleMessage('warning', '⚠️ Chat transcript is empty');
+      return;
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(transcript);
+        addConsoleMessage('success', '📋 Copied full chat history to clipboard');
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+    } catch (error: any) {
+      addConsoleMessage('error', `❌ Failed to copy chat: ${error.message || error}`);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-gray-900">
       {/* Header */}
@@ -384,17 +443,23 @@ export const AgenticChatUnified: React.FC = () => {
             </span>
           </div>
         </div>
-        <button
-          onClick={handleClearChat}
-          className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
-          title="Clear chat"
-        >
-          <Trash2 className="w-4 h-4 text-gray-400" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleCopyChat}
+            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+            title="Copy chat history"
+          >
+            <Copy className="w-4 h-4 text-gray-400" />
+          </button>
+          <button
+            onClick={handleClearChat}
+            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+            title="Clear chat"
+          >
+            <Trash2 className="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
       </div>
-
-      {/* dApp Manual Controls */}
-      <DAppManualControls />
 
       {/* Messages - Using AI Elements with Timeline */}
       <Conversation>

@@ -529,8 +529,16 @@ async function getFileDependencies(filePath: string): Promise<ToolResult> {
   }
 }
 
-async function analyzeComponent(filePath: string): Promise<ToolResult> {
+async function analyzeComponent(filePath?: string): Promise<ToolResult> {
   try {
+    if (!filePath) {
+      return {
+        success: false,
+        message: 'Missing required parameter: filePath',
+        error: 'Provide the full path to the component, e.g. /dapp/components/Button.tsx',
+      };
+    }
+
     const files = useIDEStore.getState().files;
     const componentFile = files.find((f) => f.path === filePath);
 
@@ -559,7 +567,7 @@ async function analyzeComponent(filePath: string): Promise<ToolResult> {
       componentNameMatch?.[1] ||
       componentNameMatch?.[2] ||
       componentNameMatch?.[3] ||
-      componentPath.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '') ||
+      filePath.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '') ||
       'Unknown';
 
     const hasUseClient = content.includes("'use client'") || content.includes('"use client"');
