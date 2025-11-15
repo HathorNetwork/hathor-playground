@@ -185,28 +185,22 @@ async function createHathorDapp(
     const checkResult = await runCommand(checkDirCmd);
 
     if (checkResult.data?.stdout?.includes('exists')) {
-      addConsoleMessage?.('info', `🧹 Cleaning up existing ${resolvedAppName} directory...`);
+      addConsoleMessage?.('warning', `⚠️ /app already contains ${resolvedAppName}. Remove it first or purge the sandbox.`);
+      return {
+        success: false,
+        message: `❌ ${resolvedAppName} already exists in /app. Run purgeSandbox() or remove it manually, then retry.`,
+        error: 'Existing scaffold detected',
+      };
+    }
 
-      const cleanupCommands = [
-        `cd /app && rm -rf ${resolvedAppName}`,
-        `cd /app && chmod -R u+w ${resolvedAppName} 2>/dev/null; rm -rf ${resolvedAppName}`,
-        `cd /app && find ${resolvedAppName} -delete 2>/dev/null; rm -rf ${resolvedAppName}`,
-      ];
-
-      let cleanupSuccess = false;
-      for (const cleanupCmd of cleanupCommands) {
-        await runCommand(cleanupCmd);
-        const verifyCmd = `cd /app && test -d ${resolvedAppName} && echo "exists" || echo "not_exists"`;
-        const verifyResult = await runCommand(verifyCmd);
-        if (verifyResult.data?.stdout?.includes('not_exists')) {
-          cleanupSuccess = true;
-          break;
-        }
-      }
-
-      if (!cleanupSuccess) {
-        addConsoleMessage?.('warning', `⚠️ Could not fully remove ${resolvedAppName}, but continuing...`);
-      }
+    addConsoleMessage?.('info', '🧹 Purging /app before scaffolding...');
+    const purgeResult = await runCommand('cd /app && rm -rf * && rm -rf .* 2>/dev/null || true');
+    if (!purgeResult.success) {
+      return {
+        success: false,
+        message: '❌ Failed to purge /app before scaffolding',
+        error: purgeResult.error || purgeResult.message,
+      };
     }
 
     const cmd = `cd /app && npx create-hathor-dapp@latest ${resolvedAppName} --yes --wallet-connect-id=${resolvedWC} --network=${resolvedNetwork} --skip-git`;
@@ -230,9 +224,11 @@ async function createHathorDapp(
     const packageExists = checkPackageResult.data?.stdout && !checkPackageResult.data?.stdout.includes('missing');
 
     if (!packageExists) {
+      const stdout = execResult.data?.stdout || '';
+      const stderr = execResult.data?.stderr || '';
       return {
         success: false,
-        message: `❌ Failed to scaffold dApp: ${resolvedAppName}\nDirectory or package.json not found`,
+        message: `❌ Failed to scaffold dApp: ${resolvedAppName}\nDirectory or package.json not found\nstdout:\n${stdout}\nstderr:\n${stderr}`,
         error: 'Package.json not found after scaffolding',
       };
     }

@@ -55,7 +55,7 @@ const extractTextFromMessage = (message: any): string => {
 };
 
 export const AgenticChatUnified: React.FC = () => {
-  const { activeProjectId, addConsoleMessage } = useIDEStore();
+  const { activeProjectId, addConsoleMessage, files } = useIDEStore();
 
   // Track tool calling rounds to prevent infinite loops
   const toolRoundCounterRef = useRef(0);
@@ -169,36 +169,6 @@ export const AgenticChatUnified: React.FC = () => {
         'summarize_file',
       ]);
       const isExploratoryTool = exploratoryTools.has(toolName);
-
-      const creatingDapp =
-        toolName === 'create_hathor_dapp' ||
-        (toolName === 'bootstrap_nextjs' && args?.preset === 'hathor');
-      const missingScaffold =
-        !files.some((file) => file.path.startsWith('/dapp/app/')) &&
-        !files.some((file) => file.path.startsWith('/dapp/pages/')) &&
-        !files.some((file) => file.path.endsWith('/package.json'));
-
-      if (missingScaffold && !creatingDapp) {
-        const scaffoldResult = {
-          success: false,
-          message:
-            '🚨 Missing Hathor dApp scaffold. Run create_hathor_dapp({ app_name, wallet_connect_id, network }) before editing /dapp files.',
-          error: 'Hathor dApp scaffold not detected. Must call create_hathor_dapp first.',
-        };
-
-        addToolResult({
-          tool: toolCall.toolName,
-          toolCallId: toolCall.toolCallId,
-          output: scaffoldResult,
-        });
-
-        addConsoleMessage(
-          'warning',
-          '⚠️ Hathor dApp scaffold is missing. create_hathor_dapp must be called before any dApp edit.',
-        );
-
-        return JSON.stringify(scaffoldResult);
-      }
 
       if (!planConfirmedRef.current && !isExploratoryTool) {
         const planningResult = {
@@ -825,12 +795,16 @@ export const AgenticChatUnified: React.FC = () => {
       {/* Input */}
       <div className="p-4 border-t border-gray-700">
         <form onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-2 md:flex-row">
+          <div className="flex flex-col gap-3">
             <textarea
               value={localInput}
               onChange={handleInputChange}
               placeholder="Ask me to build blueprints, dApps, or both..."
-              className="flex-1 px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 resize-none"
+              className="flex-1 px-4 py-3 text-base leading-relaxed bg-[#0f172a] bg-opacity-95 text-gray-100 border border-gray-600 rounded-2xl shadow-inner placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              style={{
+                minHeight: '96px',
+                fontFamily: '"Inter", "JetBrains Mono", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+              }}
               rows={3}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -839,12 +813,12 @@ export const AgenticChatUnified: React.FC = () => {
                 }
               }}
             />
-            <div className="flex w-full flex-col gap-2 md:w-48">
+            <div className="flex flex-col md:flex-row w-full gap-2">
               <button
                 type="button"
                 onClick={handleEnhancePrompt}
                 disabled={!localInput.trim() || enhancingPrompt}
-                className="flex items-center justify-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {enhancingPrompt ? (
                   <>
@@ -862,7 +836,7 @@ export const AgenticChatUnified: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleStop}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
                   title="Stop AI generation"
                 >
                   <Square className="w-4 h-4" />
@@ -872,7 +846,7 @@ export const AgenticChatUnified: React.FC = () => {
                 <button
                   type="submit"
                   disabled={!localInput.trim()}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+                  className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
                 >
                   <Send className="w-4 h-4" />
                   Send

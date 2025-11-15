@@ -1,5 +1,5 @@
 # Frontend Dockerfile - Multi-stage build for Next.js SSR
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -7,8 +7,12 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies with optimizations to reduce disk usage
+RUN npm ci --omit=dev --ignore-scripts && \
+    npm cache clean --force
+
+# Install only build dependencies
+RUN npm install --no-save typescript @types/node @types/react @types/react-dom
 
 # Copy source code
 COPY . .
@@ -24,10 +28,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run update-modules
 
 # Build the application
-RUN npm run build
+RUN npm run build && \
+    rm -rf node_modules && \
+    npm ci --omit=dev --ignore-scripts && \
+    npm cache clean --force
 
 # Production stage
-FROM node:18-alpine AS runner
+FROM node:20-alpine AS runner
 
 # Install curl for health checks and other utilities
 RUN apk add --no-cache curl
