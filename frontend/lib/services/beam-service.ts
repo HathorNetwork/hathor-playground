@@ -2,7 +2,7 @@
  * BEAM Cloud service for managing dApp sandboxes using TypeScript SDK
  */
 
-import { Sandbox, Image, beamOpts, Pod, TaskPolicy } from '@beamcloud/beam-js';
+import { Sandbox, Image, beamOpts, Pod } from '@beamcloud/beam-js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -584,10 +584,10 @@ export class BeamService {
       cpu: 2,
       memory: '2Gi',
       image,
-      taskPolicy: new TaskPolicy({
+      taskPolicy: {
         timeout: 900,
         maxRetries: 0,
-      }),
+      },
     });
 
     const entrypoint = ['sh', '-c', `cd ${cwd} && ${command}`];

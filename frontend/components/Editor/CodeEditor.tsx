@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
 import { useIDEStore, File } from '@/store/ide-store';
 
@@ -64,6 +64,13 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ editorRef: externalEdito
   const handleEditorDidMount = (editor: any, monaco: Monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
+
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      jsx: monaco.languages.typescript.JsxEmit.Preserve,
+      allowNonTsExtensions: true,
+      target: monaco.languages.typescript.ScriptTarget.ESNext,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+    });
 
     // Define custom elegant theme
     monaco.editor.defineTheme('elegant-dark', {
@@ -248,6 +255,19 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ editorRef: externalEdito
     }
   };
 
+  const monacoLanguage = useMemo(() => {
+    if (!activeFile) {
+      return 'plaintext';
+    }
+
+    switch (activeFile.language) {
+      case 'typescriptreact':
+        return 'typescript';
+      default:
+        return activeFile.language;
+    }
+  }, [activeFile]);
+
   if (!activeFile) {
     return (
       <div
@@ -280,7 +300,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ editorRef: externalEdito
       <Editor
         height="100%"
         defaultLanguage="python"
-        language={activeFile.language}
+        language={monacoLanguage}
+        path={activeFile.path || activeFile.id}
         value={activeFile.content}
         onChange={handleChange}
         onMount={handleEditorDidMount}

@@ -1,5 +1,6 @@
 import { beamClient } from '../beam-client';
 import { useIDEStore } from '@/store/ide-store';
+import { guardContractMetadata } from './contract-metadata';
 import type { File } from '@/store/ide-store';
 
 import { ToolResult } from './types';
@@ -296,6 +297,12 @@ async function deployDApp(): Promise<ToolResult> {
       };
     }
 
+    const metadataGuard = guardContractMetadata('deploy the dApp or restart the sandbox wallet');
+    if (metadataGuard) {
+      addConsoleMessage?.('warning', metadataGuard.message);
+      return metadataGuard;
+    }
+
     addConsoleMessage?.('info', '🚀 Deploying dApp to BEAM sandbox...');
 
     let buildLogStream: EventSource | null = null;
@@ -341,13 +348,51 @@ async function deployDApp(): Promise<ToolResult> {
       console.warn('Failed to start dev server:', devError);
     }
 
+    let verifiedStatus: ToolResult | null = null;
+    try {
+      const status = await beamClient.getSandbox(activeProjectId);
+      verifiedStatus = status
+        ? {
+            success: true,
+            message: status.dev_server_running
+              ? 'Dev server confirmed running'
+              : 'Dev server is not running after deployment',
+            data: status,
+          }
+        : {
+            success: false,
+            message: 'No sandbox status returned after deployment',
+            error: 'Sandbox lookup returned empty response',
+          };
+      if (!verifiedStatus.success || !verifiedStatus.data?.dev_server_running) {
+        addConsoleMessage?.(
+          'warning',
+          '⚠️ Sandbox did not report a running dev server after deployment. Check logs before continuing.',
+        );
+      }
+    } catch (statusError) {
+      console.warn('Failed to verify sandbox status:', statusError);
+      verifiedStatus = {
+        success: false,
+        message: '⚠️ Unable to verify dev server status',
+        error: String(statusError),
+      };
+    }
+
     if (buildLogStream) {
       buildLogStream.close();
     }
 
-    const deploymentMessage = syncResult?.success
+    let deploymentMessage = syncResult?.success
       ? `✅ dApp deployed with proper sync!\n\n${syncResult.message}`
       : '✅ dApp deployed (sync had issues but deployment continued)';
+
+    if (
+      verifiedStatus &&
+      (!verifiedStatus.success || (verifiedStatus.data && !verifiedStatus.data.dev_server_running))
+    ) {
+      deploymentMessage += `\n\n${verifiedStatus.message}\nUse get_sandbox_logs() to inspect why the dev server is down.`;
+    }
 
     return {
       success: true,
@@ -356,6 +401,7 @@ async function deployDApp(): Promise<ToolResult> {
         syncResult,
         devServerResult,
         url: devServerResult?.data?.url || null,
+        status: verifiedStatus?.data ?? null,
       },
     };
   } catch (error) {
@@ -515,6 +561,12 @@ async function restartDevServer(): Promise<ToolResult> {
       };
     }
 
+    const metadataGuard = guardContractMetadata('start or restart the dev server');
+    if (metadataGuard) {
+      addConsoleMessage?.('warning', metadataGuard.message);
+      return metadataGuard;
+    }
+
     addConsoleMessage?.('info', '🔄 Syncing files before restart...');
 
     try {
@@ -540,10 +592,18 @@ async function restartDevServer(): Promise<ToolResult> {
       startSandboxLogStream(activeProjectId, addConsoleMessage);
     }
 
+    const sandboxStatus = await beamClient.getSandbox(activeProjectId);
+    const running = sandboxStatus?.dev_server_running;
+
     return {
-      success: true,
-      message: `✅ Dev server restarted!\n\nURL: ${result.url}`,
-      data: result,
+      success: Boolean(running),
+      message: running
+        ? `✅ Dev server restarted!\n\nURL: ${result.url}`
+        : '⚠️ Dev server command returned but the sandbox is still stopped. Check logs before continuing.',
+      data: {
+        ...result,
+        status: sandboxStatus || null,
+      },
     };
   } catch (error) {
     return {

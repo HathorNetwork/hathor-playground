@@ -19,6 +19,40 @@ import { blueprintTools, fileTools, beamTools, syncDApp } from '@/lib/tools';
 import { Conversation, ConversationContent, ConversationScrollButton, ConversationEmptyState } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { PlanProgress, type PlanProgressStep } from '@/components/ai-elements/plan-progress';
+import { usePromptEnhancer } from '@/hooks/usePromptEnhancer';
+
+type ConversationPhase = 'idle' | 'planning' | 'execution' | 'reflection';
+
+const PLAN_HEADING = '## The Plan';
+const REFLECTION_HEADING = '## Reflection';
+
+const createDefaultProgress = (): PlanProgressStep[] => [
+  { id: 'analyze', label: 'Analyze request', status: 'in-progress' },
+  { id: 'plan', label: 'Plan solution', status: 'pending' },
+  { id: 'execute', label: 'Execute tools', status: 'pending' },
+  { id: 'reflect', label: 'Reflect & summarize', status: 'pending' },
+];
+
+const extractTextFromMessage = (message: any): string => {
+  if (!message) {
+    return '';
+  }
+
+  if (message.parts && message.parts.length > 0) {
+    return message.parts
+      .filter((part: any) => part?.type === 'text')
+      .map((part: any) => part.text)
+      .join('\n')
+      .trim();
+  }
+
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+
+  return '';
+};
 
 export const AgenticChatUnified: React.FC = () => {
   const { activeProjectId, addConsoleMessage } = useIDEStore();
@@ -32,8 +66,49 @@ export const AgenticChatUnified: React.FC = () => {
   const failedToolCallsRef = useRef<Map<string, number>>(new Map());
   const MAX_RETRIES_PER_TOOL = 2; // Allow 2 attempts, block the 3rd
 
+  const planPhaseRef = useRef<ConversationPhase>('idle');
+  const planConfirmedRef = useRef(false);
+  const toolsStepStartedRef = useRef(false);
+
   // Use local state for input since AI SDK's input handler isn't working
   const [localInput, setLocalInput] = React.useState('');
+  const [planProgress, setPlanProgress] = React.useState<PlanProgressStep[]>([]);
+
+  const resetPlanProgress = React.useCallback(() => {
+    setPlanProgress(createDefaultProgress());
+  }, []);
+
+  const updatePlanProgress = React.useCallback(
+    (stepId: string, status: PlanProgressStep['status'], detail?: string) => {
+      setPlanProgress((prev) =>
+        prev.map((step) =>
+          step.id === stepId
+            ? {
+                ...step,
+                status,
+                detail: detail ?? step.detail,
+              }
+            : step,
+        ),
+      );
+    },
+    [],
+  );
+
+  const completePlanSteps = React.useCallback((stepIds: string[]) => {
+    setPlanProgress((prev) =>
+      prev.map((step) =>
+        stepIds.includes(step.id)
+          ? {
+              ...step,
+              status: 'complete',
+            }
+          : step,
+      ),
+    );
+  }, []);
+
+  const { enhancingPrompt, promptEnhanced, enhancePrompt, resetEnhancer } = usePromptEnhancer();
 
   // Create refs for functions we need in callbacks
   const sendMessageRef = useRef<any>(null);
@@ -85,6 +160,28 @@ export const AgenticChatUnified: React.FC = () => {
       console.log('🔧 Tool call:', toolName, args);
       console.log('🔧 Tool call ID:', toolCall.toolCallId);
 
+      if (!planConfirmedRef.current) {
+        const planningResult = {
+          success: false,
+          message:
+            '📝 Planning required before running tools. Produce "## The Plan" with numbered steps, then try the tool again.',
+          error: 'Tool execution blocked until plan is shared.',
+        };
+
+        addToolResult({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          output: planningResult,
+        });
+
+        addConsoleMessage(
+          'warning',
+          '⚠️ Tool call blocked because the assistant has not produced "## The Plan" yet.',
+        );
+
+        return JSON.stringify(planningResult);
+      }
+
       // CHECK FOR REPEATED FAILURES - Prevent infinite retry loops!
       const toolCallKey = getToolCallKey(toolName, args);
       const failureCount = failedToolCallsRef.current.get(toolCallKey) || 0;
@@ -109,6 +206,15 @@ export const AgenticChatUnified: React.FC = () => {
       }
 
       addConsoleMessage('info', `🔧 Executing: ${toolName}(${JSON.stringify(args).slice(0, 100)})`);
+
+      if (planPhaseRef.current === 'planning' && planConfirmedRef.current) {
+        planPhaseRef.current = 'execution';
+      }
+
+      if (planPhaseRef.current === 'execution' && !toolsStepStartedRef.current) {
+        toolsStepStartedRef.current = true;
+        updatePlanProgress('execute', 'in-progress', 'Running tools to update files/tests');
+      }
 
       try {
         let result;
@@ -153,6 +259,18 @@ export const AgenticChatUnified: React.FC = () => {
               args.componentPath || args.filePath || args.path,
               args.targetPage,
             );
+            break;
+
+          case 'list_key_files':
+            result = await fileTools.listKeyFiles();
+            break;
+
+          case 'search_symbol':
+            result = await fileTools.searchSymbol(args.query, args.path);
+            break;
+
+          case 'summarize_file':
+            result = await fileTools.summarizeFile(args.path);
             break;
 
           // ========== Blueprint Tools ==========
@@ -329,6 +447,10 @@ export const AgenticChatUnified: React.FC = () => {
     setLocalInput('');
     toolRoundCounterRef.current = 0;
     failedToolCallsRef.current.clear(); // Reset failure tracking on clear
+    planPhaseRef.current = 'idle';
+    planConfirmedRef.current = false;
+    toolsStepStartedRef.current = false;
+    setPlanProgress([]);
     if (activeProjectId) {
       localStorage.removeItem(`agentic-chat-unified-${activeProjectId}`);
     }
@@ -338,12 +460,29 @@ export const AgenticChatUnified: React.FC = () => {
     setLocalInput(e.target.value);
   };
 
+  const handleEnhancePrompt = React.useCallback(() => {
+    if (!localInput.trim() || enhancingPrompt) {
+      return;
+    }
+    enhancePrompt(localInput, setLocalInput);
+  }, [enhancePrompt, enhancingPrompt, localInput]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!localInput.trim() || !activeProjectId) {
       return;
     }
+
+    resetEnhancer();
+    planPhaseRef.current = 'planning';
+    planConfirmedRef.current = false;
+    toolsStepStartedRef.current = false;
+    resetPlanProgress();
+    updatePlanProgress('analyze', 'in-progress', 'Understanding the request');
+    updatePlanProgress('plan', 'pending', 'Waiting for ## The Plan');
+    updatePlanProgress('execute', 'pending', 'Tools unlocked after planning');
+    updatePlanProgress('reflect', 'pending', 'Will run after execution');
 
     const userMessage = localInput;
     setLocalInput(''); // Clear input immediately
@@ -367,6 +506,46 @@ export const AgenticChatUnified: React.FC = () => {
       addConsoleMessage('error', `❌ Failed to send message: ${error.message}`);
     }
   };
+
+  React.useEffect(() => {
+    if (!messages.length) {
+      return;
+    }
+
+    const lastAssistant = [...messages].reverse().find((msg) => msg.role === 'assistant');
+    if (!lastAssistant) {
+      return;
+    }
+
+    const textContent = extractTextFromMessage(lastAssistant);
+    if (!textContent) {
+      return;
+    }
+
+    if (!planConfirmedRef.current && textContent.includes(PLAN_HEADING)) {
+      planConfirmedRef.current = true;
+      planPhaseRef.current = 'execution';
+      completePlanSteps(['analyze', 'plan']);
+      updatePlanProgress('plan', 'complete', 'Plan ready. Execute only after approval.');
+      updatePlanProgress('execute', 'pending', 'Waiting for tool usage');
+    }
+
+    if (textContent.includes(REFLECTION_HEADING)) {
+      planPhaseRef.current = 'reflection';
+      completePlanSteps(['execute', 'reflect']);
+      updatePlanProgress('reflect', 'complete', 'Reflection shared with the user.');
+      planPhaseRef.current = 'idle';
+    }
+  }, [messages, completePlanSteps, updatePlanProgress]);
+
+  React.useEffect(() => {
+    if (messages.length === 0) {
+      planPhaseRef.current = 'idle';
+      planConfirmedRef.current = false;
+      toolsStepStartedRef.current = false;
+      setPlanProgress([]);
+    }
+  }, [messages.length]);
 
   const formatMessageForCopy = (message: any) => {
     const partTexts =
@@ -460,6 +639,9 @@ export const AgenticChatUnified: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Planner / Status */}
+      {planProgress.length > 0 && <PlanProgress steps={planProgress} />}
 
       {/* Messages - Using AI Elements with Timeline */}
       <Conversation>
@@ -577,7 +759,7 @@ export const AgenticChatUnified: React.FC = () => {
       {/* Input */}
       <div className="p-4 border-t border-gray-700">
         <form onSubmit={handleSubmit}>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 md:flex-row">
             <textarea
               value={localInput}
               onChange={handleInputChange}
@@ -591,25 +773,49 @@ export const AgenticChatUnified: React.FC = () => {
                 }
               }}
             />
-            {isLoading ? (
+            <div className="flex w-full flex-col gap-2 md:w-48">
               <button
                 type="button"
-                onClick={handleStop}
-                className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center gap-2"
-                title="Stop AI generation"
+                onClick={handleEnhancePrompt}
+                disabled={!localInput.trim() || enhancingPrompt}
+                className="flex items-center justify-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Square className="w-5 h-5" />
-                Stop
+                {enhancingPrompt ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Enhancing...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    Enhance prompt
+                  </>
+                )}
               </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!localInput.trim()}
-                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            )}
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+                  title="Stop AI generation"
+                >
+                  <Square className="w-4 h-4" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!localInput.trim()}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+                >
+                  <Send className="w-4 h-4" />
+                  Send
+                </button>
+              )}
+              {promptEnhanced && (
+                <span className="text-center text-[11px] font-medium text-green-400">Prompt enhanced</span>
+              )}
+            </div>
           </div>
         </form>
       </div>

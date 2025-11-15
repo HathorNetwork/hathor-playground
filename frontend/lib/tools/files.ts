@@ -3,6 +3,8 @@ import type { File } from '@/store/ide-store';
 
 import { ToolResult } from './types';
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 async function listFiles(path: string = '/'): Promise<ToolResult> {
   try {
     const files = useIDEStore.getState().files;
@@ -828,6 +830,180 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
 }
 }
 
+async function listKeyFiles(): Promise<ToolResult> {
+  try {
+    const files = useIDEStore.getState().files;
+    const blueprints = files.filter(
+      (file) => file.path.startsWith('/contracts/') || file.path.startsWith('/blueprints/'),
+    );
+    const tests = files.filter((file) => file.path.startsWith('/tests/'));
+    const dappFiles = files.filter((file) => file.path.startsWith('/dapp/'));
+
+    const formatTopFiles = (list: File[], limit = 5) =>
+      list
+        .slice(0, limit)
+        .map((file) => `  • ${file.path} (${file.content.length} bytes)`)
+        .join('\n');
+
+    const message = [
+      '📦 Project Overview',
+      '',
+      `🧱 Blueprints (${blueprints.length})`,
+      blueprints.length ? formatTopFiles(blueprints) : '  • None found',
+      '',
+      `🧪 Tests (${tests.length})`,
+      tests.length ? formatTopFiles(tests) : '  • None found',
+      '',
+      `🌐 dApp Files (${dappFiles.length})`,
+      dappFiles.length ? formatTopFiles(dappFiles) : '  • None found',
+      '',
+      'Tip: Use summarize_file(path) for deeper insight into any file.',
+    ].join('\n');
+
+    return {
+      success: true,
+      message,
+      data: {
+        blueprints: blueprints.map((file) => ({ path: file.path, size: file.content.length })),
+        tests: tests.map((file) => ({ path: file.path, size: file.content.length })),
+        dapp: dappFiles.map((file) => ({ path: file.path, size: file.content.length })),
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to list key files',
+      error: String(error),
+    };
+  }
+}
+
+async function searchSymbol(query: string, scope?: string): Promise<ToolResult> {
+  try {
+    if (!query || !query.trim()) {
+      return {
+        success: false,
+        message: 'Missing search query',
+        error: 'Provide a symbol, class name, or identifier to search for.',
+      };
+    }
+
+    const files = useIDEStore.getState().files;
+    const sanitizedQuery = query.trim();
+    const regex = new RegExp(escapeRegExp(sanitizedQuery), 'gi');
+    const matches: Array<{ path: string; line: number; snippet: string }> = [];
+
+    files.forEach((file) => {
+      if (scope && !file.path.startsWith(scope)) {
+        return;
+      }
+
+      const lines = file.content.split('\n');
+      lines.forEach((line, index) => {
+        if (regex.test(line)) {
+          matches.push({
+            path: file.path,
+            line: index + 1,
+            snippet: line.trim().slice(0, 160),
+          });
+        }
+        regex.lastIndex = 0;
+      });
+    });
+
+    const limit = 25;
+    const trimmedMatches = matches.slice(0, limit);
+    const header = `🔎 Found ${matches.length} match${matches.length === 1 ? '' : 'es'} for "${sanitizedQuery}"${
+      scope ? ` under ${scope}` : ''
+    }`;
+    const body = trimmedMatches
+      .map((match) => `  • ${match.path}:${match.line} — ${match.snippet}`)
+      .join('\n');
+
+    return {
+      success: true,
+      message: matches.length ? `${header}\n${body}` : `${header}\n  • None found`,
+      data: {
+        totalMatches: matches.length,
+        matches: trimmedMatches,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to search for "${query}"`,
+      error: String(error),
+    };
+  }
+}
+
+async function summarizeFile(path: string): Promise<ToolResult> {
+  try {
+    if (!path || !path.trim()) {
+      return {
+        success: false,
+        message: 'Missing file path to summarize',
+        error: 'Provide a /contracts/, /tests/, or /dapp/ path.',
+      };
+    }
+
+    const files = useIDEStore.getState().files;
+    const file = files.find((f) => f.path === path);
+
+    if (!file) {
+      return {
+        success: false,
+        message: `File not found: ${path}`,
+        error: 'Use list_files() to see available paths.',
+      };
+    }
+
+    const lines = file.content.split('\n');
+    const nonEmptyLines = lines.filter((line) => line.trim().length > 0).length;
+    const preview = lines.slice(0, Math.min(12, lines.length)).join('\n');
+
+    const decorators = (file.content.match(/@\w+/g) || []).length;
+    const classes = (file.content.match(/class\s+\w+/g) || []).length;
+    const functions = (file.content.match(/def\s+\w+/g) || file.content.match(/function\s+\w+/g) || []).length;
+
+    const message = [
+      `📄 ${file.name}`,
+      '',
+      `Path: ${file.path}`,
+      `Language: ${file.language}`,
+      `Type: ${file.type}`,
+      `Lines: ${lines.length} (${nonEmptyLines} with content)`,
+      `Classes: ${classes} | Functions: ${functions} | Decorators: ${decorators}`,
+      '',
+      'Snippet:',
+      '```',
+      preview || '(file is empty)',
+      '```',
+    ].join('\n');
+
+    return {
+      success: true,
+      message,
+      data: {
+        path: file.path,
+        language: file.language,
+        type: file.type,
+        lines: lines.length,
+        nonEmptyLines,
+        classes,
+        functions,
+        decorators,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to summarize ${path}`,
+      error: String(error),
+    };
+  }
+}
+
 export const fileTools = {
   listFiles,
   readFile,
@@ -838,6 +1014,9 @@ export const fileTools = {
   getFileDependencies,
   analyzeComponent,
   integrateComponent,
+  listKeyFiles,
+  searchSymbol,
+  summarizeFile,
 };
 
 export type FileTools = typeof fileTools;

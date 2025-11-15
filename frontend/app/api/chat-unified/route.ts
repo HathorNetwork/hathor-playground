@@ -7,55 +7,15 @@
  * All tools execute client-side for maximum performance and security.
  */
 
-import { openai } from '@ai-sdk/openai';
-import { google } from '@ai-sdk/google';
 import { streamText, tool, convertToCoreMessages, convertToModelMessages } from 'ai';
 import { z } from 'zod';
-import { initLogger, wrapAISDKModel } from 'braintrust';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-
-// Initialize Braintrust logger
-console.log('[Braintrust] Initializing logger...');
-initLogger({
-  projectName: process.env.PROJECT_NAME || 'Hathor Playground',
-  apiKey: process.env.BRAINTRUST_API_KEY!,
-});
-console.log('[Braintrust] Logger initialized');
-
-// Load system prompt from file
-const getSystemPrompt = (): string => {
-  const promptPath = join(process.cwd(), 'prompts', 'blueprint-specialist.md');
-  return readFileSync(promptPath, 'utf-8');
-};
-
-// Determine AI provider from environment and wrap model for tracing
-const getAIModel = () => {
-  const provider = process.env.AI_PROVIDER || 'gemini';
-
-  if (provider === 'openai') {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY not configured');
-    }
-    console.log('[Braintrust] Wrapping OpenAI model...');
-    return wrapAISDKModel(openai('gpt-4o'));
-  } else if (provider === 'gemini') {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-      throw new Error('GOOGLE_API_KEY not configured');
-    }
-    console.log('[Braintrust] Wrapping Gemini model...');
-    return wrapAISDKModel(google('gemini-2.5-pro'));
-  }
-
-  throw new Error(`Unsupported AI provider: ${provider}`);
-};
+import { getHathorAIModel, getHathorSystemPrompt } from '@/lib/server/ai-config';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const model = getAIModel();
+    const model = getHathorAIModel();
+    const systemPrompt = getHathorSystemPrompt();
 
     // Extract messages - DefaultChatTransport might send it differently
     let rawMessages = body.messages || body;
@@ -158,7 +118,7 @@ export async function POST(req: Request) {
     const result = streamText({
       model,
       messages,
-      system: getSystemPrompt(),
+      system: systemPrompt,
 
       tools: {
         // ========== Shared Tools ==========
@@ -226,6 +186,26 @@ export async function POST(req: Request) {
           parameters: z.object({
             componentPath: z.string().describe('Path to the component file to integrate (e.g., "/dapp/hathor-dapp/components/SimpleCounter.tsx")'),
             targetPage: z.string().optional().describe('Optional: Target page path (defaults to app/page.tsx if not specified)'),
+          }),
+        }),
+
+        list_key_files: tool({
+          description: 'Summarize high-impact files (blueprints, tests, dApp) so you know where to focus first.',
+          parameters: z.object({}),
+        }),
+
+        search_symbol: tool({
+          description: 'Search for a symbol, class, or function name across the entire project.',
+          parameters: z.object({
+            query: z.string().describe('Symbol or identifier to search for (case-insensitive).'),
+            path: z.string().optional().describe('Optional directory scope, e.g., "/contracts" or "/dapp/components".'),
+          }),
+        }),
+
+        summarize_file: tool({
+          description: 'Summarize a file, including language, size, number of classes/functions, and a short snippet.',
+          parameters: z.object({
+            path: z.string().describe('Path to the file to summarize (e.g., /contracts/LiquidityPool.py).'),
           }),
         }),
 
