@@ -160,11 +160,21 @@ export const AgenticChatUnified: React.FC = () => {
       console.log('🔧 Tool call:', toolName, args);
       console.log('🔧 Tool call ID:', toolCall.toolCallId);
 
-      if (!planConfirmedRef.current) {
+      const exploratoryTools = new Set([
+        'list_files',
+        'read_file',
+        'get_project_structure',
+        'find_file',
+        'search_symbol',
+        'summarize_file',
+      ]);
+      const isExploratoryTool = exploratoryTools.has(toolName);
+
+      if (!planConfirmedRef.current && !isExploratoryTool) {
         const planningResult = {
           success: false,
           message:
-            '📝 Planning required before running tools. Produce "## The Plan" with numbered steps, then try the tool again.',
+            '📝 Please share "## The Plan" with numbered steps before running modifying or execution tools. You can keep inspecting files, but planning is required first for edits or commands.',
           error: 'Tool execution blocked until plan is shared.',
         };
 
@@ -508,18 +518,32 @@ export const AgenticChatUnified: React.FC = () => {
   };
 
   React.useEffect(() => {
+    let reflectionCleanup: ReturnType<typeof setTimeout> | null = null;
+
     if (!messages.length) {
-      return;
+      return () => {
+        if (reflectionCleanup) {
+          clearTimeout(reflectionCleanup);
+        }
+      };
     }
 
     const lastAssistant = [...messages].reverse().find((msg) => msg.role === 'assistant');
     if (!lastAssistant) {
-      return;
+      return () => {
+        if (reflectionCleanup) {
+          clearTimeout(reflectionCleanup);
+        }
+      };
     }
 
     const textContent = extractTextFromMessage(lastAssistant);
     if (!textContent) {
-      return;
+      return () => {
+        if (reflectionCleanup) {
+          clearTimeout(reflectionCleanup);
+        }
+      };
     }
 
     if (!planConfirmedRef.current && textContent.includes(PLAN_HEADING)) {
@@ -535,7 +559,19 @@ export const AgenticChatUnified: React.FC = () => {
       completePlanSteps(['execute', 'reflect']);
       updatePlanProgress('reflect', 'complete', 'Reflection shared with the user.');
       planPhaseRef.current = 'idle';
+
+      reflectionCleanup = setTimeout(() => {
+        if (planPhaseRef.current === 'idle') {
+          setPlanProgress([]);
+        }
+      }, 2000);
     }
+
+    return () => {
+      if (reflectionCleanup) {
+        clearTimeout(reflectionCleanup);
+      }
+    };
   }, [messages, completePlanSteps, updatePlanProgress]);
 
   React.useEffect(() => {

@@ -1,5 +1,5 @@
 import { beamClient } from '../beam-client';
-import { getDappFilesSnapshot } from '../state/files';
+import { getDappFilesSnapshot, shouldIgnorePath } from '../state/files';
 import { buildManifest, diffManifests, loadManifest, saveManifest } from '../sync/manifest';
 import { useIDEStore } from '@/store/ide-store';
 
@@ -99,7 +99,7 @@ export async function syncDApp(
         const payload: Record<string, string> = {};
         for (const filePath of filesToUpload) {
           const file = snapshot.find((entry) => entry.path === filePath);
-          if (file) {
+          if (file && !shouldIgnorePath(file.path)) {
             payload[file.path.replace('/dapp/', '/app/')] = file.content;
           }
         }
@@ -115,9 +115,12 @@ export async function syncDApp(
       const sandboxEntries = await fetchAllSandboxFiles(activeProjectId);
 
       for (const entry of sandboxEntries) {
-        const idePath = entry.path.startsWith('/dapp/')
-          ? entry.path
-          : entry.path.replace('/app/', '/dapp/');
+      const idePath = entry.path.startsWith('/dapp/')
+        ? entry.path
+        : entry.path.replace('/app/', '/dapp/');
+      if (shouldIgnorePath(idePath)) {
+        continue;
+      }
         const storeState = useIDEStore.getState();
         const existingFile = storeState.files.find((f) => f.path === idePath);
         const decodedContent = decodeEntryContent(entry);
