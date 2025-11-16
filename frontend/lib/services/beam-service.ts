@@ -14,6 +14,7 @@ const fsp = fs.promises;
 
 const DEFAULT_CODE_PATH = '/app';
 const DEFAULT_PORT = 3000;
+const DEFAULT_WALLET_CONNECT_ID = '8264fff563181da658ce64ee80e80458';
 
 const baseImagePromise: Promise<Image> = (async () => {
   configureBEAM();
@@ -344,8 +345,81 @@ export class BeamService {
       console.log = originalLog;
       console.error = originalError;
       console.warn = originalWarn;
-      this.buildInProgress.set(projectId, false);
     });
+  }
+
+  private appendBuildLog(projectId: string, message: string) {
+    const logs = this.buildLogs.get(projectId) || [];
+    logs.push(message);
+    this.buildLogs.set(projectId, logs);
+  }
+
+  private async execInSandbox(instance: any, command: string) {
+    const process = await instance.exec('sh', '-c', command);
+    const result = await process.wait();
+    const stdout = (await process.stdout.read()) || '';
+    const stderr = (await process.stderr.read()) || '';
+    const rawExit = result.exitCode;
+    const exitCode =
+      typeof rawExit === 'number'
+        ? rawExit
+        : typeof rawExit === 'string'
+        ? parseInt(rawExit, 10) || 0
+        : 0;
+
+    if (exitCode !== 0) {
+      throw new Error(
+        `Command failed: ${command}\nstdout:\n${stdout?.slice(0, 2000) || '(empty)'}\nstderr:\n${
+          stderr?.slice(0, 2000) || '(empty)'
+        }`,
+      );
+    }
+
+    return { stdout, stderr, exitCode };
+  }
+
+  private async ensureDefaultDappScaffold(projectId: string, instance: any): Promise<boolean> {
+    await this.execInSandbox(instance, `mkdir -p ${DEFAULT_CODE_PATH}`);
+    this.appendBuildLog(projectId, '🔍 Checking for existing Hathor dApp scaffold in sandbox...');
+
+    try {
+      await instance.fs.statFile(`${DEFAULT_CODE_PATH}/package.json`);
+      this.appendBuildLog(projectId, '✓ Found package.json. Reusing existing scaffold.');
+      return false;
+    } catch {
+      // package.json missing — continue with scaffold
+    }
+
+    try {
+      this.appendBuildLog(
+        projectId,
+        '⚙️ No dApp detected. Running create-hathor-dapp template (this may take up to a minute)...',
+      );
+      await this.execInSandbox(
+        instance,
+        `cd ${DEFAULT_CODE_PATH} && find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +`,
+      );
+      await this.execInSandbox(
+        instance,
+        `cd ${DEFAULT_CODE_PATH} && npx create-hathor-dapp@latest hathor-dapp --yes --wallet-connect-id=${DEFAULT_WALLET_CONNECT_ID} --network=testnet --skip-git`,
+      );
+      await this.execInSandbox(
+        instance,
+        `cd ${DEFAULT_CODE_PATH} && cp -a hathor-dapp/. ./ && rm -rf hathor-dapp`,
+      );
+      await this.execInSandbox(instance, `cd ${DEFAULT_CODE_PATH} && ls package.json`);
+      this.appendBuildLog(
+        projectId,
+        '✅ Default Hathor dApp scaffolded. Run sync_dapp("sandbox-to-ide") to pull it into the IDE.',
+      );
+      return true;
+    } catch (error: any) {
+      this.appendBuildLog(
+        projectId,
+        `❌ Failed to scaffold default Hathor dApp: ${error?.message || String(error)}`,
+      );
+      throw error;
+    }
   }
 
   async createSandbox(projectId: string): Promise<SandboxInfo> {
@@ -371,33 +445,41 @@ export class BeamService {
     this.buildLogs.set(projectId, ['Starting sandbox creation...', 'Building Docker image...']);
     this.buildInProgress.set(projectId, true);
 
-    const image = await baseImagePromise;
-    const sandbox = new Sandbox({
-      name: 'hathor-dapp-' + projectId,
-      cpu: 1,
-      memory: '1Gi',
-      image: image,
-      keepWarmSeconds: 300,
-    });
+    try {
+      const image = await baseImagePromise;
+      const sandbox = new Sandbox({
+        name: 'hathor-dapp-' + projectId,
+        cpu: 1,
+        memory: '1Gi',
+        image: image,
+        keepWarmSeconds: 300,
+      });
 
-    // Capture console output during sandbox creation
-    const instance = await this.captureConsoleOutput(projectId, async () => {
-      return await sandbox.create();
-    });
+      // Capture console output during sandbox creation
+      const instance = await this.captureConsoleOutput(projectId, async () => {
+        return await sandbox.create();
+      });
 
-    const url = await instance.exposePort(DEFAULT_PORT);
-    const sandboxId = this.getSandboxId(instance, projectId);
+      await this.ensureDefaultDappScaffold(projectId, instance);
 
-    this.sandboxes.set(projectId, instance);
-    this.urls.set(projectId, url);
+      const url = await instance.exposePort(DEFAULT_PORT);
+      const sandboxId = this.getSandboxId(instance, projectId);
 
-    // Add completion message
-    const logs = this.buildLogs.get(projectId) || [];
-    logs.push('✓ Sandbox created successfully!');
-    logs.push('✓ Port exposed: ' + url);
-    this.buildLogs.set(projectId, logs);
+      this.sandboxes.set(projectId, instance);
+      this.urls.set(projectId, url);
 
-    return { url, sandbox_id: sandboxId, project_id: projectId, dev_server_running: this.processes.has(projectId) };
+      this.appendBuildLog(projectId, '✓ Sandbox created successfully!');
+      this.appendBuildLog(projectId, '✓ Port exposed: ' + url);
+
+      return {
+        url,
+        sandbox_id: sandboxId,
+        project_id: projectId,
+        dev_server_running: this.processes.has(projectId),
+      };
+    } finally {
+      this.buildInProgress.set(projectId, false);
+    }
   }
 
   async getSandbox(projectId: string): Promise<any | null> {

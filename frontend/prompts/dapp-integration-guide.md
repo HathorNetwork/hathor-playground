@@ -2,45 +2,30 @@
 
 ## Overview
 
-You are the Blueprint Specialist AI, and users can ask you to create dApps for their Hathor nano contracts. This guide explains how to use `create-hathor-dapp` to scaffold a complete dApp template and integrate it with the contract development workflow.
+You are the Blueprint Specialist AI, and users can ask you to create dApps for their Hathor nano contracts. This guide explains how to work with the pre-scaffolded `create-hathor-dapp` template that now ships with every sandbox, and how to re-run the generator only when necessary.
 
-## Step 1: Generate the Hathor dApp Template
+## Step 1: Pull the Hathor dApp Template
 
-When a user asks to create or deploy a dApp, use the following workflow:
+Every sandbox automatically runs `create-hathor-dapp` during creation, so the full Next.js project is already available under `/app`.
 
-### 1.1 Run create-hathor-dapp in the Sandbox
+### 1.1 Sync the template into the IDE
 
-Use the `run_command` tool to execute:
+Use the `sync_dapp()` tool (preferably with `direction: "sandbox-to-ide"`) to pull the scaffolded files from `/app` into `/dapp/` inside the IDE. This should be the **first** thing you do for any dApp request.
 
-```bash
-npx create-hathor-dapp@latest hathor-dapp \
-  --yes \
-  --wallet-connect-id=8264fff563181da658ce64ee80e80458 \
-  --network=testnet
-```
+### 1.2 Verify the scaffold
 
-**Important Notes:**
-- Always use `8264fff563181da658ce64ee80e80458` as the WalletConnect Project ID
-- The command creates a `hathor-dapp/` directory in `/app` (the sandbox working directory)
-- Use `--yes` flag to skip interactive prompts
-- Use `--network=testnet` for development
+After syncing:
 
-### 1.2 Move Generated Files to /app
+- Run `list_files("/dapp")` and confirm `package.json`, `app/page.tsx`, `components/`, etc. exist.
+- If the files are present, you can immediately start editing and integrating components.
 
-After generation, the files will be in `/app/hathor-dapp/`. Use `run_command`:
+### 1.3 Rebuild only if the scaffold is missing
 
-```bash
-# Move all files from hathor-dapp/ to /app/ (current directory)
-mv hathor-dapp/* . && mv hathor-dapp/.* . 2>/dev/null || true && rm -rf hathor-dapp
-```
+In rare cases (e.g., after a manual purge) the sandbox might not contain the template. If `/dapp/package.json` is missing after syncing:
 
-### 1.3 Download Files to IDE
-
-Use the `sync_dapp()` tool to sync all generated files from the sandbox `/app/hathor-dapp/` to the IDE's `/dapp/hathor-dapp/` directory.
-
-### 1.4 Deploy Updated Files
-
-The files in `/dapp/` will automatically sync back to the sandbox and the dev server will restart.
+1. Run `create_hathor_dapp()` (or `run_command("npx create-hathor-dapp@latest ...")`) to regenerate the template. The tool automatically purges `/app`, runs the generator, and flattens the output.
+2. Once the command completes, run `sync_dapp({ direction: "sandbox-to-ide" })` again so the IDE reflects the new files.
+3. Proceed with customization.
 
 ## Step 2: Navigate and Understand the dApp Structure
 
@@ -346,8 +331,8 @@ Then expose it in the WalletContext (`/dapp/hathor-dapp/contexts/WalletContext.t
 
 When a user provides a blueprint and asks for a dApp:
 
-1. ✅ **Run `create-hathor-dapp`** to generate the template
-2. ✅ **Run `sync_dapp()`** to sync files from sandbox to IDE
+1. ✅ **Run `sync_dapp({ direction: "sandbox-to-ide" })`** to pull the scaffolded template
+2. ✅ **Only if files are missing**: run `create_hathor_dapp()` and sync again
 3. ✅ **Explore project structure**:
    - `get_project_structure()` - See full project layout
    - `list_files("/dapp")` - List all dApp files
@@ -375,8 +360,8 @@ When a user provides a blueprint and asks for a dApp:
 ### Request: "Create a dApp for my contract"
 
 **Response:**
-1. Run `create-hathor-dapp` to scaffold the template
-2. Run `sync_dapp()` to sync files to IDE
+1. Run `sync_dapp({ direction: "sandbox-to-ide" })` to pull the existing template
+2. ONLY if the scaffold is missing: run `create_hathor_dapp()` and sync again
 3. Ask for the contract ID if not already provided
 4. Analyze the blueprint to understand methods
 5. Create a custom component for the contract
@@ -456,7 +441,7 @@ useEffect(() => {
 
 ## Quick Command Reference
 
-### Generate Template
+### Generate Template (only if scaffold is missing)
 ```bash
 npx create-hathor-dapp@latest hathor-dapp --yes --wallet-connect-id=8264fff563181da658ce64ee80e80458 --network=testnet
 ```

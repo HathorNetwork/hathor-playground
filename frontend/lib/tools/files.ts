@@ -766,17 +766,74 @@ async function analyzeComponent(filePath?: string): Promise<ToolResult> {
   }
 }
 
-async function integrateComponent(componentPath: string, targetPage?: string): Promise<ToolResult> {
+async function integrateComponent(componentPath?: string, targetPage?: string): Promise<ToolResult> {
   try {
     const files = useIDEStore.getState().files;
     const { updateFile } = useIDEStore.getState();
 
-    const componentFile = files.find((f) => f.path === componentPath);
-    if (!componentFile) {
+    // If componentPath is not provided, try to auto-detect recently created components
+    if (!componentPath || componentPath.trim() === '') {
+      // Find all component files in /dapp/components/
+      const componentFiles = files.filter(
+        (f) =>
+          f.path.includes('/dapp/') &&
+          f.path.includes('/components/') &&
+          (f.path.endsWith('.tsx') || f.path.endsWith('.jsx')),
+      );
+
+      if (componentFiles.length === 0) {
+        return {
+          success: false,
+          message: 'No component path provided and no components found in /dapp/components/',
+          error:
+            'Please provide componentPath parameter. Example: integrate_component({ componentPath: "/dapp/components/SimpleCounter.tsx" })',
+        };
+      }
+
+      // If only one component exists, use it
+      if (componentFiles.length === 1) {
+        componentPath = componentFiles[0].path;
+      } else {
+        // Multiple components - suggest the most recently created one or list options
+        const componentList = componentFiles
+          .map((f) => `  - ${f.path}`)
+          .slice(0, 5)
+          .join('\n');
+        return {
+          success: false,
+          message: `Multiple components found. Please specify componentPath:\n${componentList}`,
+          error:
+            'componentPath parameter is required when multiple components exist. Example: integrate_component({ componentPath: "/dapp/components/SimpleCounter.tsx" })',
+        };
+      }
+    }
+
+    // At this point, componentPath should be defined
+    if (!componentPath) {
       return {
         success: false,
-        message: `Component not found: ${componentPath}`,
-        error: 'Cannot integrate non-existent component',
+        message: 'Component path is required',
+        error: 'Please provide componentPath parameter or ensure a component exists in /dapp/components/',
+      };
+    }
+
+    // TypeScript type guard: ensure componentPath is a string
+    const resolvedComponentPath: string = componentPath;
+
+    const componentFile = files.find((f) => f.path === resolvedComponentPath);
+    if (!componentFile) {
+      // Try to find similar paths
+      const similarFiles = files
+        .filter((f) => f.path.includes(resolvedComponentPath.split('/').pop() || ''))
+        .slice(0, 3)
+        .map((f) => f.path);
+
+      const suggestions = similarFiles.length > 0 ? `\n\nDid you mean one of these?\n${similarFiles.map((p) => `  - ${p}`).join('\n')}` : '';
+
+      return {
+        success: false,
+        message: `Component not found: ${resolvedComponentPath}${suggestions}`,
+        error: 'Cannot integrate non-existent component. Please check the file path.',
       };
     }
 
@@ -787,7 +844,7 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
       componentNameMatch?.[1] ||
       componentNameMatch?.[2] ||
       componentNameMatch?.[3] ||
-      componentPath.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '') ||
+      resolvedComponentPath.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '') ||
       'Component';
 
     let targetPagePath = targetPage;
@@ -818,7 +875,7 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
       };
     }
 
-    const componentDir = componentPath.substring(0, componentPath.lastIndexOf('/'));
+    const componentDir = resolvedComponentPath.substring(0, resolvedComponentPath.lastIndexOf('/'));
     const targetDir = targetPagePath.substring(0, targetPagePath.lastIndexOf('/'));
 
     const getRelativePath = (from: string, to: string): string => {
@@ -832,7 +889,7 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
 
       const upLevels = fromParts.length - i - 1;
       const downPath = toParts.slice(i).join('/');
-      const componentFileName = componentPath.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '') || '';
+      const componentFileName = resolvedComponentPath.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '') || '';
 
       if (upLevels === 0) {
         return `./${downPath}/${componentFileName}`;
@@ -844,8 +901,8 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
 
     let importPath = getRelativePath(targetDir, componentDir);
 
-    if (componentPath.startsWith('/dapp/')) {
-      importPath = componentPath.replace('/dapp/', '@/').replace(/\.(tsx?|jsx?)$/, '');
+    if (resolvedComponentPath.startsWith('/dapp/')) {
+      importPath = resolvedComponentPath.replace('/dapp/', '@/').replace(/\.(tsx?|jsx?)$/, '');
     }
 
     const importPattern = new RegExp(
@@ -920,7 +977,7 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
     '',
     ...changes,
     '',
-    `📝 Component: ${componentPath}`,
+    `📝 Component: ${resolvedComponentPath}`,
     `📄 Target page: ${targetPagePath}`,
     `🔗 Import path: ${importPath}`,
   ].join('\n');
@@ -931,7 +988,7 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
     success: true,
     message,
     data: {
-      componentPath,
+      componentPath: resolvedComponentPath,
       targetPage: targetPagePath,
       componentName,
       importPath,
@@ -939,13 +996,14 @@ async function integrateComponent(componentPath: string, targetPage?: string): P
       autoDeploy: autoSyncResult ?? undefined,
     },
   };
-} catch (error) {
-  return {
-    success: false,
-    message: `Failed to integrate component: ${componentPath}`,
-    error: String(error),
-  };
-}
+  } catch (error) {
+    const componentPathStr = componentPath || 'unknown';
+    return {
+      success: false,
+      message: `Failed to integrate component: ${componentPathStr}`,
+      error: String(error),
+    };
+  }
 }
 
 async function listKeyFiles(): Promise<ToolResult> {

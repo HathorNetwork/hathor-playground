@@ -75,6 +75,7 @@ interface IDEState {
   isRunningTests: boolean;
   isStorageInitialized: boolean;
   sandboxUrls: Record<string, string | null>;
+  initialSyncCompleted: Record<string, boolean>; // Track which projects have had initial dApp sync
 
   // Project actions
   createProject: (name: string, description?: string) => string;
@@ -175,6 +176,17 @@ function saveProjectsToLocalStorage(projects: Project[], activeProjectId: string
   }
 }
 
+// Helper: Save initial sync state to localStorage
+function saveInitialSyncState(syncState: Record<string, boolean>) {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('hathor-initial-sync-completed', JSON.stringify(syncState));
+    }
+  } catch (error) {
+    console.error('Failed to save initial sync state to localStorage:', error);
+  }
+}
+
 const createIDEStore: StateCreator<IDEState> = (set, get) => {
   // Initialize with sample projects
   const initialProjects = SAMPLE_PROJECTS;
@@ -204,6 +216,18 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
     isRunningTests: false,
     isStorageInitialized: false,
     sandboxUrls: {},
+    initialSyncCompleted: (() => {
+      // Load from localStorage if available
+      if (typeof window !== 'undefined') {
+        try {
+          const stored = localStorage.getItem('hathor-initial-sync-completed');
+          return stored ? JSON.parse(stored) : {};
+        } catch {
+          return {};
+        }
+      }
+      return {};
+    })(),
 
     // Project actions
     createProject: (name, description) => {
@@ -238,6 +262,11 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
         const newProjects = state.projects.filter((p) => p.id !== id);
         const wasActive = state.activeProjectId === id;
 
+        // Clean up sync state for deleted project
+        const updatedSyncState = { ...state.initialSyncCompleted };
+        delete updatedSyncState[id];
+        saveInitialSyncState(updatedSyncState);
+
         if (wasActive && newProjects.length > 0) {
           // Switch to first remaining project
           const newActiveProject = newProjects[0];
@@ -247,12 +276,14 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
             files: newActiveProject.files,
             openFileIds: newActiveProject.files[0] ? [newActiveProject.files[0].id] : [],
             activeFileId: newActiveProject.files[0]?.id || null,
+            initialSyncCompleted: updatedSyncState,
           };
         }
 
         return {
           projects: newProjects,
           activeProjectId: wasActive ? null : state.activeProjectId,
+          initialSyncCompleted: updatedSyncState,
         };
       });
     },
@@ -268,6 +299,42 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
           openFileIds: project.files[0] ? [project.files[0].id] : [],
           activeFileId: project.files[0]?.id || null,
         });
+
+        // Trigger initial dApp sync if not already done (client-side only)
+        if (typeof window !== 'undefined' && !state.initialSyncCompleted[id]) {
+          // Use setTimeout to avoid blocking the state update
+          setTimeout(async () => {
+            try {
+              // Dynamically import to avoid SSR issues
+              const { syncDApp } = await import('@/lib/tools/sync');
+              const { addConsoleMessage } = get();
+              
+              addConsoleMessage?.('info', `🔄 Auto-syncing pre-scaffolded dApp for project "${project.name}"...`);
+              
+              const result = await syncDApp('sandbox-to-ide', id);
+              
+              if (result.success) {
+                const currentState = get();
+                const updatedSyncState = {
+                  ...currentState.initialSyncCompleted,
+                  [id]: true,
+                };
+                
+                set({ initialSyncCompleted: updatedSyncState });
+                saveInitialSyncState(updatedSyncState);
+                
+                addConsoleMessage?.('success', `✅ Initial dApp sync completed for "${project.name}"`);
+              } else {
+                addConsoleMessage?.('warning', `⚠️ Initial sync had issues: ${result.message || result.error}`);
+                // Don't mark as completed if sync failed - allow retry on next activation
+              }
+            } catch (error: any) {
+              const { addConsoleMessage } = get();
+              addConsoleMessage?.('error', `❌ Failed to auto-sync dApp: ${error?.message || String(error)}`);
+              // Don't mark as completed on error - allow retry
+            }
+          }, 100); // Small delay to ensure state is updated
+        }
       }
     },
 
@@ -640,6 +707,17 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
         await state.loadFilesFromStorage();
         await state.loadChatSessionsFromStorage();
 
+        // Trigger initial sync for active project if not already done
+        // (handles case where sample projects are used and no stored projects exist)
+        if (typeof window !== 'undefined' && state.activeProjectId) {
+          setTimeout(() => {
+            const currentState = get();
+            if (currentState.setActiveProject && !currentState.initialSyncCompleted[currentState.activeProjectId!]) {
+              currentState.setActiveProject(currentState.activeProjectId!);
+            }
+          }, 100);
+        }
+
         console.log('IDE store initialized with persistent storage');
       } catch (error) {
         console.error('Failed to initialize storage:', error);
@@ -671,6 +749,16 @@ const createIDEStore: StateCreator<IDEState> = (set, get) => {
               openFileIds: activeProject.files[0] ? [activeProject.files[0].id] : [],
               activeFileId: activeProject.files[0]?.id || null,
             });
+
+            // Trigger initial sync check for the loaded project
+            // Use setTimeout to ensure state is fully updated first
+            setTimeout(() => {
+              const state = get();
+              if (state.setActiveProject && activeProject.id) {
+                // Call setActiveProject to trigger sync check (it will skip if already synced)
+                state.setActiveProject(activeProject.id);
+              }
+            }, 50);
 
             console.log(`Loaded ${cleanedProjects.length} projects from localStorage`);
             return;

@@ -182,9 +182,9 @@ export async function POST(req: Request) {
         }),
 
         integrate_component: tool({
-          description: 'Automatically integrate a component into a page/route. Adds import statement and component usage. If targetPage is not specified, defaults to app/page.tsx. Use this after creating a new component to make it visible in the app.',
+          description: 'Automatically integrate a component into a page/route. Adds import statement and component usage. If componentPath is not provided, will auto-detect the component if only one exists in /dapp/components/. If targetPage is not specified, defaults to app/page.tsx. Use this after creating a new component to make it visible in the app.',
           parameters: z.object({
-            componentPath: z.string().describe('Path to the component file to integrate (e.g., "/dapp/hathor-dapp/components/SimpleCounter.tsx")'),
+            componentPath: z.string().optional().describe('Path to the component file to integrate (e.g., "/dapp/components/SimpleCounter.tsx"). If not provided, will auto-detect if only one component exists in /dapp/components/.'),
             targetPage: z.string().optional().describe('Optional: Target page path (defaults to app/page.tsx if not specified)'),
           }),
         }),
