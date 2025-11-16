@@ -112,6 +112,22 @@ Based on the contract blueprint, create a new component in `/dapp/hathor-dapp/co
 
 **Template for Contract Component:**
 
+**🚨 CRITICAL: Correct Import Path and Property Naming**
+
+When creating components that use blueprint IDs, you MUST:
+1. **Import from the correct file**: `import { NANO_CONTRACTS } from "../lib/nanocontracts";` (NOT from `../lib/config`)
+2. **Use camelCase property names**: `NANO_CONTRACTS.simpleCounter` (NOT `simple_counter` with underscore)
+3. **Access the `.id` property**: `NANO_CONTRACTS.simpleCounter.id` (the manifest entry has an `id` field)
+
+**Example:**
+```typescript
+import { NANO_CONTRACTS } from "../lib/nanocontracts";
+
+const NC_ID = NANO_CONTRACTS.simpleCounter.id; // ✅ CORRECT
+// NOT: NANO_CONTRACTS.simple_counter ❌ WRONG
+// NOT: from "../lib/config" ❌ WRONG
+```
+
 ```typescript
 'use client';
 
@@ -119,6 +135,7 @@ import { useState, useEffect } from 'react';
 import { useWallet } from '@/contexts/WalletContext';
 import { useHathor } from '@/contexts/HathorContext';
 import { toast } from '@/lib/toast';
+import { NANO_CONTRACTS } from '../lib/nanocontracts'; // ✅ CORRECT IMPORT PATH
 
 interface ContractState {
   // Define based on blueprint's state variables
@@ -131,7 +148,8 @@ export default function MyContract() {
   const [state, setState] = useState<ContractState | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const contractId = process.env.NEXT_PUBLIC_CONTRACT_IDS?.[0];
+  // ✅ CORRECT: Use NANO_CONTRACTS from manifest (camelCase property, access .id)
+  const contractId = NANO_CONTRACTS.simpleCounter.id; // Replace 'simpleCounter' with your blueprint's key
 
   // Fetch contract state on mount
   useEffect(() => {
@@ -331,41 +349,56 @@ Then expose it in the WalletContext (`/dapp/hathor-dapp/contexts/WalletContext.t
 
 When a user provides a blueprint and asks for a dApp:
 
-1. ✅ **Run `sync_dapp({ direction: "sandbox-to-ide" })`** to pull the scaffolded template
-2. ✅ **Only if files are missing**: run `create_hathor_dapp()` and sync again
-3. ✅ **Explore project structure**:
+1. ✅ **Publish the blueprint on-chain**: 
+   - `publish_blueprint({ blueprintPath: "/contracts/SimpleCounter.py", address: "WPhehTyNHTPz954CskfuSgLEfuKXbXeK3f" })` 
+   - Save the returned `blueprint_id` and `nc_id` for the manifest
+2. ✅ **Run `sync_dapp({ direction: "sandbox-to-ide" })`** to pull the scaffolded template
+3. ✅ **Only if files are missing**: run `create_hathor_dapp()` and sync again
+4. ✅ **Update the manifest** (`/dapp/lib/nanocontracts.ts`) with the published blueprint_id:
+   ```typescript
+   export const NANO_CONTRACTS = {
+     simpleCounter: {
+       id: '<blueprint_id_from_publish>',
+       name: 'SimpleCounter',
+     },
+   };
+   ```
+5. ✅ **Explore project structure**:
    - `get_project_structure()` - See full project layout
    - `list_files("/dapp")` - List all dApp files
    - `find_file("page.tsx")` - Find main page
    - `get_file_dependencies("/dapp/hathor-dapp/app/page.tsx")` - Understand imports
-4. ✅ **Parse the blueprint** to identify:
+6. ✅ **Parse the blueprint** to identify:
    - Contract state variables
    - `@public` methods and their signatures
    - Required actions (deposits/withdrawals)
-5. ✅ **Update `.env.local`** with the contract ID
-6. ✅ **Create a contract component** that:
+7. ✅ **Update `.env.local`** with the contract ID (if needed)
+8. ✅ **Create a contract component** that:
    - Displays contract state
    - Provides UI for each @public method
    - Handles transactions correctly
-7. ✅ **Integrate the component**:
+9. ✅ **Integrate the component**:
    - `integrate_component("/dapp/hathor-dapp/components/SimpleCounter.tsx")` - Auto-adds to page
    - `read_file("/dapp/hathor-dapp/app/page.tsx")` - Verify integration
-8. ✅ **Sync and deploy**:
-   - `sync_dapp()` - Sync to sandbox
-   - `restart_dev_server()` - Restart dev server
-9. ✅ **Test thoroughly** on testnet before suggesting mainnet
+10. ✅ **Sync and deploy**:
+    - `sync_dapp()` - Sync to sandbox
+    - `restart_dev_server()` - Restart dev server
+11. ✅ **Test thoroughly** on testnet before suggesting mainnet
 
 ## Step 6: Common User Requests and Responses
 
 ### Request: "Create a dApp for my contract"
 
 **Response:**
-1. Run `sync_dapp({ direction: "sandbox-to-ide" })` to pull the existing template
-2. ONLY if the scaffold is missing: run `create_hathor_dapp()` and sync again
-3. Ask for the contract ID if not already provided
-4. Analyze the blueprint to understand methods
-5. Create a custom component for the contract
-6. Provide the live dApp URL from the sandbox
+1. **Publish the blueprint on-chain**: `publish_blueprint({ blueprintPath: "/contracts/SimpleCounter.py", address: "WPhehTyNHTPz954CskfuSgLEfuKXbXeK3f" })` to get blueprint_id and nc_id
+2. Run `sync_dapp({ direction: "sandbox-to-ide" })` to pull the existing template
+3. ONLY if the scaffold is missing: run `create_hathor_dapp()` and sync again
+4. **Update the manifest**: Write the published blueprint_id to `/dapp/lib/nanocontracts.ts`
+5. Analyze the blueprint to understand methods
+6. Create a custom component for the contract
+7. Integrate the component into the dApp
+8. Sync and deploy to sandbox
+9. Provide the live dApp URL from the sandbox
 
 ### Request: "Add a deposit button"
 

@@ -296,6 +296,14 @@ export const AgenticChatUnified: React.FC = () => {
             result = await blueprintTools.compileBlueprint(args.path);
             break;
 
+          case 'publish_blueprint':
+            result = await fileTools.publishBlueprint(
+              args.blueprintPath,
+              args.address,
+              args.walletId
+            );
+            break;
+
           case 'execute_method':
             result = await blueprintTools.executeMethod(
               args.path,

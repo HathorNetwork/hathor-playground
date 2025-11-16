@@ -1180,6 +1180,70 @@ async function summarizeFile(path: string): Promise<ToolResult> {
   }
 }
 
+async function publishBlueprint(
+  blueprintPath: string,
+  address: string,
+  walletId?: string,
+): Promise<ToolResult> {
+  try {
+    // Read blueprint code from file
+    const files = useIDEStore.getState().files;
+    const blueprintFile = files.find((f) => f.path === blueprintPath);
+
+    if (!blueprintFile) {
+      return {
+        success: false,
+        message: `Blueprint file not found: ${blueprintPath}`,
+        error: 'Please check the file path and ensure the blueprint exists',
+      };
+    }
+
+    const blueprintCode = blueprintFile.content;
+
+    // Call the API route
+    const response = await fetch('/api/blueprint/publish', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code: blueprintCode,
+        address: address,
+        walletId: walletId,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      return {
+        success: false,
+        message: `Failed to publish blueprint: ${data.error || response.statusText}`,
+        error: data.details || data.error || 'Unknown error',
+      };
+    }
+
+    const { blueprint_id, nc_id, transaction } = data;
+
+    return {
+      success: true,
+      message: `✅ Blueprint published successfully!\n\n📋 Blueprint ID: ${blueprint_id}\n📋 NC ID: ${nc_id}\n\n💡 Use these IDs to create the manifest and configure your dApp.`,
+      data: {
+        blueprint_id,
+        nc_id,
+        transaction,
+        blueprintPath,
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `Failed to publish blueprint: ${error?.message || String(error)}`,
+      error: String(error),
+    };
+  }
+}
+
 export const fileTools = {
   listFiles,
   readFile,
@@ -1193,6 +1257,7 @@ export const fileTools = {
   listKeyFiles,
   searchSymbol,
   summarizeFile,
+  publishBlueprint,
 };
 
 export type FileTools = typeof fileTools;

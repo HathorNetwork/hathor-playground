@@ -232,6 +232,15 @@ export async function POST(req: Request) {
           }),
         }),
 
+        publish_blueprint: tool({
+          description: 'Publish a blueprint to the Hathor network on-chain using the Hathor Wallet API. Returns blueprint_id and nc_id (same for now) which can be used to create the manifest and configure the dApp.',
+          parameters: z.object({
+            blueprintPath: z.string().describe('Path to blueprint file (e.g., "/contracts/SimpleCounter.py")'),
+            address: z.string().describe('Hathor address that will sign the on-chain blueprint transaction (e.g., "WPhehTyNHTPz954CskfuSgLEfuKXbXeK3f")'),
+            walletId: z.string().optional().describe('Optional: Wallet ID (defaults to "playground" if not provided and HATHOR_WALLET_ID env var is not set)'),
+          }),
+        }),
+
         execute_method: tool({
           description: 'Execute a blueprint method (initialize, @public, or @view)',
           parameters: z.object({
