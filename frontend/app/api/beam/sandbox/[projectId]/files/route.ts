@@ -70,7 +70,7 @@ export async function GET(
 
     if (shouldGzip) {
       const gzipped = await gzipAsync(payloadBuffer);
-      return new NextResponse(gzipped, {
+      return new NextResponse(gzipped as any, {
         status: 200,
         headers: {
           'Content-Type': 'application/json',

@@ -2,27 +2,37 @@ import { pyodideRunner } from '../pyodide-runner';
 import { useIDEStore } from '@/store/ide-store';
 
 import { ToolResult } from './types';
+import { validateBlueprintPath, validationResultToError } from './validation';
+import { executeTool } from './middleware';
 
 async function compileBlueprint(path: string): Promise<ToolResult> {
-  try {
-    const files = useIDEStore.getState().files;
-    const file = files.find((f) => f.path === path);
+  // Pre-flight validation
+  const pathValidation = validateBlueprintPath(path);
+  if (!pathValidation.valid) {
+    return validationResultToError(pathValidation, 'INVALID_BLUEPRINT_PATH').toToolResult();
+  }
 
-    if (!file) {
-      return {
-        success: false,
-        message: `File not found: ${path}`,
-        error: 'Cannot compile non-existent file',
-      };
-    }
+  return executeTool(
+    'compile_blueprint',
+    async () => {
+      const files = useIDEStore.getState().files;
+      const file = files.find((f) => f.path === path);
 
-    if (!path.startsWith('/blueprints/') && !path.startsWith('/contracts/')) {
-      return {
-        success: false,
-        message: `Invalid blueprint path: ${path}`,
-        error: 'Blueprints must be in /blueprints/ or /contracts/',
-      };
-    }
+      if (!file) {
+        return {
+          success: false,
+          message: `File not found: ${path}`,
+          error: 'Cannot compile non-existent file',
+        };
+      }
+
+      if (!path.startsWith('/blueprints/') && !path.startsWith('/contracts/')) {
+        return {
+          success: false,
+          message: `Invalid blueprint path: ${path}`,
+          error: 'Blueprints must be in /blueprints/ or /contracts/',
+        };
+      }
 
     await pyodideRunner.initialize();
 
@@ -42,21 +52,20 @@ async function compileBlueprint(path: string): Promise<ToolResult> {
       };
     }
 
-    return {
-      success: false,
-      message: `❌ Compilation failed for ${path}`,
-      error: result.error || 'Unknown compilation error',
-      data: {
-        traceback: result.traceback,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Failed to compile blueprint: ${path}`,
-      error: String(error),
-    };
-  }
+      return {
+        success: false,
+        message: `❌ Compilation failed for ${path}`,
+        error: result.error || 'Unknown compilation error',
+        data: {
+          traceback: result.traceback,
+        },
+      };
+    },
+    {
+      retries: 0, // Compilation shouldn't be retried automatically
+      timeout: 60000, // 60 second timeout for compilation
+    }
+  );
 }
 
 async function executeMethod(
@@ -65,17 +74,33 @@ async function executeMethod(
   args: any[] = [],
   callerAddress?: string,
 ): Promise<ToolResult> {
-  try {
-    const files = useIDEStore.getState().files;
-    const file = files.find((f) => f.path === path);
+  // Pre-flight validation
+  const pathValidation = validateBlueprintPath(path);
+  if (!pathValidation.valid) {
+    return validationResultToError(pathValidation, 'INVALID_BLUEPRINT_PATH').toToolResult();
+  }
 
-    if (!file) {
-      return {
-        success: false,
-        message: `File not found: ${path}`,
-        error: 'Cannot execute method on non-existent file',
-      };
-    }
+  if (!methodName || typeof methodName !== 'string') {
+    return {
+      success: false,
+      message: 'Method name is required and must be a string',
+      error: 'Invalid method name',
+    };
+  }
+
+  return executeTool(
+    'execute_method',
+    async () => {
+      const files = useIDEStore.getState().files;
+      const file = files.find((f) => f.path === path);
+
+      if (!file) {
+        return {
+          success: false,
+          message: `File not found: ${path}`,
+          error: 'Cannot execute method on non-existent file',
+        };
+      }
 
     const { contractInstances, compiledContracts } = useIDEStore.getState();
     let contractId = contractInstances[file.id]?.contractId;
@@ -127,111 +152,133 @@ async function executeMethod(
       };
     }
 
-    const errorMsg = [
-      `❌ Execution failed: ${methodName}()`,
-      ``,
-      `Error: ${result.error || 'Unknown error'}`,
-      result.traceback ? `\nTraceback:\n${result.traceback}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+      const errorMsg = [
+        `❌ Execution failed: ${methodName}()`,
+        ``,
+        `Error: ${result.error || 'Unknown error'}`,
+        result.traceback ? `\nTraceback:\n${result.traceback}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
 
-    return {
-      success: false,
-      message: errorMsg,
-      error: result.error || 'Unknown execution error',
-      data: {
-        traceback: result.traceback,
-        args_received: args,
-        method_name: methodName,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Failed to execute method: ${methodName}`,
-      error: String(error),
-    };
-  }
+      return {
+        success: false,
+        message: errorMsg,
+        error: result.error || 'Unknown execution error',
+        data: {
+          traceback: result.traceback,
+          args_received: args,
+          method_name: methodName,
+        },
+      };
+    },
+    {
+      retries: 0, // Method execution shouldn't be retried automatically
+      timeout: 30000, // 30 second timeout
+    }
+  );
 }
 
 async function runTests(testPath: string): Promise<ToolResult> {
-  try {
-    const files = useIDEStore.getState().files;
-    const testFile = files.find((f) => f.path === testPath);
+  // Pre-flight validation
+  const pathValidation = validateFilePath(testPath);
+  if (!pathValidation.valid) {
+    return validationResultToError(pathValidation, 'INVALID_TEST_PATH').toToolResult();
+  }
 
-    if (!testFile) {
-      return {
-        success: false,
-        message: `Test file not found: ${testPath}`,
-        error: 'Cannot run non-existent test file',
-      };
-    }
-
-    if (!testPath.startsWith('/tests/')) {
-      return {
-        success: false,
-        message: `Invalid test path: ${testPath}`,
-        error: 'Test files must be in /tests/',
-      };
-    }
-
-    await pyodideRunner.initialize();
-
-    const contractFiles = files.filter(
-      (f) =>
-        (f.path.startsWith('/contracts/') || f.path.startsWith('/blueprints/')) &&
-        f.type === 'contract',
-    );
-
-    const result = await pyodideRunner.runTests(testFile.content, testFile.name, contractFiles);
-
-    if (result.success) {
-      const passRate = result.tests_run ? `${result.tests_passed}/${result.tests_run} passed` : 'unknown';
-
-      return {
-        success: true,
-        message: `✅ Tests completed: ${passRate}\n\n${result.output}`,
-        data: {
-          tests_run: result.tests_run,
-          tests_passed: result.tests_passed,
-          tests_failed: result.tests_failed,
-          output: result.output,
-        },
-      };
-    }
-
+  if (!testPath.startsWith('/tests/')) {
     return {
       success: false,
-      message: `❌ Tests failed`,
-      error: result.error || 'Unknown test error',
-      data: {
-        output: result.output,
-        traceback: result.traceback,
-        failure_details: result.failure_details,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Failed to run tests: ${testPath}`,
-      error: String(error),
+      message: `Invalid test path: ${testPath}`,
+      error: 'Test files must be in /tests/',
     };
   }
+
+  if (!testPath.endsWith('.py')) {
+    return {
+      success: false,
+      message: 'Test file must have .py extension',
+      error: 'Invalid test file extension',
+    };
+  }
+
+  return executeTool(
+    'run_tests',
+    async () => {
+      const files = useIDEStore.getState().files;
+      const testFile = files.find((f) => f.path === testPath);
+
+      if (!testFile) {
+        return {
+          success: false,
+          message: `Test file not found: ${testPath}`,
+          error: 'Cannot run non-existent test file',
+        };
+      }
+
+      await pyodideRunner.initialize();
+
+      const contractFiles = files.filter(
+        (f) =>
+          (f.path.startsWith('/contracts/') || f.path.startsWith('/blueprints/')) &&
+          f.type === 'contract',
+      );
+
+      const result = await pyodideRunner.runTests(testFile.content, testFile.name, contractFiles);
+
+      if (result.success) {
+        const passRate = result.tests_run ? `${result.tests_passed}/${result.tests_run} passed` : 'unknown';
+
+        return {
+          success: true,
+          message: `✅ Tests completed: ${passRate}\n\n${result.output}`,
+          data: {
+            tests_run: result.tests_run,
+            tests_passed: result.tests_passed,
+            tests_failed: result.tests_failed,
+            output: result.output,
+          },
+        };
+      }
+
+      return {
+        success: false,
+        message: `❌ Tests failed`,
+        error: result.error || 'Unknown test error',
+        data: {
+          output: result.output,
+          traceback: result.traceback,
+          failure_details: result.failure_details,
+        },
+      };
+    },
+    {
+      retries: 0, // Test execution shouldn't be retried automatically
+      timeout: 120000, // 2 minute timeout for tests
+    }
+  );
 }
 
 async function validateBlueprint(path: string): Promise<ToolResult> {
-  try {
-    const files = useIDEStore.getState().files;
-    const file = files.find((f) => f.path === path);
+  // Pre-flight validation
+  const pathValidation = validateBlueprintPath(path);
+  if (!pathValidation.valid) {
+    return validationResultToError(pathValidation, 'INVALID_BLUEPRINT_PATH').toToolResult();
+  }
 
-    if (!file) {
-      return {
-        success: false,
-        message: `File not found: ${path}`,
-        error: 'Cannot validate non-existent file',
-      };
-    }
+  return executeTool(
+    'validate_blueprint',
+    async () => {
+      const files = useIDEStore.getState().files;
+      const file = files.find((f) => f.path === path);
+
+      if (!file) {
+        return {
+          success: false,
+          message: `File not found: ${path}`,
+          error: 'Cannot validate non-existent file',
+        };
+      }
 
     const code = file.content;
     const issues: string[] = [];
@@ -268,26 +315,26 @@ async function validateBlueprint(path: string): Promise<ToolResult> {
       }
     }
 
-    if (issues.length === 0) {
-      return {
-        success: true,
-        message: `✅ ${path} passed validation!`,
-        data: { valid: true },
-      };
-    }
+      if (issues.length === 0) {
+        return {
+          success: true,
+          message: `✅ ${path} passed validation!`,
+          data: { valid: true },
+        };
+      }
 
-    return {
-      success: false,
-      message: `🔍 Validation issues found in ${path}:\n\n${issues.map((i) => `  ${i}`).join('\n')}`,
-      data: { valid: false, issues },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Failed to validate blueprint: ${path}`,
-      error: String(error),
-    };
-  }
+      return {
+        success: false,
+        message: `🔍 Validation issues found in ${path}:\n\n${issues.map((i) => `  ${i}`).join('\n')}`,
+        data: { valid: false, issues },
+        warnings: issues.filter((i) => i.startsWith('⚠️')),
+      };
+    },
+    {
+      retries: 0, // Validation is deterministic, no retry needed
+      timeout: 5000, // Quick validation, 5 second timeout
+    }
+  );
 }
 
 async function listMethods(path: string): Promise<ToolResult> {

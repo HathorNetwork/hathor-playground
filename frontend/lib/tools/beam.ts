@@ -4,6 +4,8 @@ import { guardContractMetadata } from './contract-metadata';
 import type { File } from '@/store/ide-store';
 
 import { ToolResult } from './types';
+import { validateActiveProject, validationResultToError } from './validation';
+import { executeTool } from './middleware';
 
 const formatToolError = (result: ToolResult): string => {
   const parts: string[] = [];
@@ -54,16 +56,33 @@ function startSandboxLogStream(projectId: string, addConsoleMessage?: (type: 'in
 }
 
 async function runCommand(command: string): Promise<ToolResult> {
-  try {
-    const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
+  // Pre-flight validation
+  const { activeProjectId } = useIDEStore.getState();
+  const projectValidation = validateActiveProject(activeProjectId);
+  if (!projectValidation.valid) {
+    return validationResultToError(projectValidation, 'NO_ACTIVE_PROJECT').toToolResult();
+  }
 
-    if (!activeProjectId) {
-      return {
-        success: false,
-        message: 'No active project',
-        error: 'Select or create a project first',
-      };
-    }
+  if (!command || typeof command !== 'string' || command.trim().length === 0) {
+    return {
+      success: false,
+      message: 'Command is required and must be a non-empty string',
+      error: 'Invalid command',
+    };
+  }
+
+  return executeTool(
+    'run_command',
+    async () => {
+      const { activeProjectId, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
     addConsoleMessage?.('info', `$ ${command}`);
 
@@ -138,13 +157,12 @@ async function runCommand(command: string): Promise<ToolResult> {
         });
       });
     });
-  } catch (error) {
-    return {
-      success: false,
-      message: '❌ Failed to run command',
-      error: String(error),
-    };
-  }
+    },
+    {
+      retries: 0, // Commands shouldn't be retried automatically
+      timeout: 300000, // 5 minute timeout for long-running commands
+    }
+  );
 }
 
 async function purgeSandbox(): Promise<ToolResult> {
@@ -312,16 +330,25 @@ async function createHathorDapp(
 }
 
 async function deployDApp(): Promise<ToolResult> {
-  try {
-    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+  // Pre-flight validation
+  const { activeProjectId } = useIDEStore.getState();
+  const projectValidation = validateActiveProject(activeProjectId);
+  if (!projectValidation.valid) {
+    return validationResultToError(projectValidation, 'NO_ACTIVE_PROJECT').toToolResult();
+  }
 
-    if (!activeProjectId) {
-      return {
-        success: false,
-        message: 'No active project',
-        error: 'Select or create a project first',
-      };
-    }
+  return executeTool(
+    'deploy_dapp',
+    async () => {
+      const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
     const metadataGuard = guardContractMetadata('deploy the dApp or restart the sandbox wallet');
     if (metadataGuard) {
@@ -420,23 +447,22 @@ async function deployDApp(): Promise<ToolResult> {
       deploymentMessage += `\n\n${verifiedStatus.message}\nUse get_sandbox_logs() to inspect why the dev server is down.`;
     }
 
-    return {
-      success: true,
-      message: deploymentMessage,
-      data: {
-        syncResult,
-        devServerResult,
-        url: devServerResult?.data?.url || null,
-        status: verifiedStatus?.data ?? null,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: '❌ Failed to deploy dApp',
-      error: String(error),
-    };
-  }
+      return {
+        success: true,
+        message: deploymentMessage,
+        data: {
+          syncResult,
+          devServerResult,
+          url: devServerResult?.data?.url || null,
+          status: verifiedStatus?.data ?? null,
+        },
+      };
+    },
+    {
+      retries: 0, // Deployment shouldn't be retried automatically
+      timeout: 600000, // 10 minute timeout for deployment
+    }
+  );
 }
 
 type UploadInput = string | string[] | Record<string, string>;
@@ -454,16 +480,25 @@ function normalizePath(path: string): string {
 }
 
 async function uploadFiles(input: UploadInput): Promise<ToolResult> {
-  try {
-    const { files, activeProjectId, addConsoleMessage } = useIDEStore.getState();
+  // Pre-flight validation
+  const { activeProjectId } = useIDEStore.getState();
+  const projectValidation = validateActiveProject(activeProjectId);
+  if (!projectValidation.valid) {
+    return validationResultToError(projectValidation, 'NO_ACTIVE_PROJECT').toToolResult();
+  }
 
-    if (!activeProjectId) {
-      return {
-        success: false,
-        message: 'No active project',
-        error: 'Select or create a project first',
-      };
-    }
+  return executeTool(
+    'upload_files',
+    async () => {
+      const { files, activeProjectId, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
     const filesMap: Record<string, string> = {};
 
@@ -517,33 +552,41 @@ async function uploadFiles(input: UploadInput): Promise<ToolResult> {
 
     await beamClient.uploadFiles(activeProjectId, filesMap);
 
-    return {
-      success: true,
-      message: `✅ Uploaded ${uploadCount} file(s) to sandbox`,
-      data: {
-        files: Object.keys(filesMap),
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: '❌ Failed to upload files',
-      error: String(error),
-    };
-  }
+      return {
+        success: true,
+        message: `✅ Uploaded ${uploadCount} file(s) to sandbox`,
+        data: {
+          files: Object.keys(filesMap),
+        },
+      };
+    },
+    {
+      retries: 1,
+      timeout: 30000, // 30 second timeout for file uploads
+    }
+  );
 }
 
 async function getSandboxUrl(): Promise<ToolResult> {
-  try {
-    const { activeProjectId, setSandboxUrl } = useIDEStore.getState();
+  // Pre-flight validation
+  const { activeProjectId } = useIDEStore.getState();
+  const projectValidation = validateActiveProject(activeProjectId);
+  if (!projectValidation.valid) {
+    return validationResultToError(projectValidation, 'NO_ACTIVE_PROJECT').toToolResult();
+  }
 
-    if (!activeProjectId) {
-      return {
-        success: false,
-        message: 'No active project',
-        error: 'Select or create a project first',
-      };
-    }
+  return executeTool(
+    'get_sandbox_url',
+    async () => {
+      const { activeProjectId, setSandboxUrl } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
     const sandbox = await beamClient.getSandbox(activeProjectId);
 
@@ -555,37 +598,45 @@ async function getSandboxUrl(): Promise<ToolResult> {
       };
     }
 
-    setSandboxUrl(activeProjectId, sandbox.url);
+      setSandboxUrl(activeProjectId, sandbox.url);
 
-    return {
-      success: true,
-      message: `🌐 Sandbox URL: ${sandbox.url}`,
-      data: {
-        url: sandbox.url,
-        sandbox_id: sandbox.sandbox_id,
-        project_id: sandbox.project_id,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: '❌ Failed to get sandbox URL',
-      error: String(error),
-    };
-  }
+      return {
+        success: true,
+        message: `🌐 Sandbox URL: ${sandbox.url}`,
+        data: {
+          url: sandbox.url,
+          sandbox_id: sandbox.sandbox_id,
+          project_id: sandbox.project_id,
+        },
+      };
+    },
+    {
+      retries: 1, // Can retry once for transient network errors
+      timeout: 10000, // 10 second timeout
+    }
+  );
 }
 
 async function restartDevServer(): Promise<ToolResult> {
-  try {
-    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+  // Pre-flight validation
+  const { activeProjectId } = useIDEStore.getState();
+  const projectValidation = validateActiveProject(activeProjectId);
+  if (!projectValidation.valid) {
+    return validationResultToError(projectValidation, 'NO_ACTIVE_PROJECT').toToolResult();
+  }
 
-    if (!activeProjectId) {
-      return {
-        success: false,
-        message: 'No active project',
-        error: 'Select or create a project first',
-      };
-    }
+  return executeTool(
+    'restart_dev_server',
+    async () => {
+      const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
     const metadataGuard = guardContractMetadata('start or restart the dev server');
     if (metadataGuard) {
@@ -621,36 +672,44 @@ async function restartDevServer(): Promise<ToolResult> {
     const sandboxStatus = await beamClient.getSandbox(activeProjectId);
     const running = sandboxStatus?.dev_server_running;
 
-    return {
-      success: Boolean(running),
-      message: running
-        ? `✅ Dev server restarted!\n\nURL: ${result.url}`
-        : '⚠️ Dev server command returned but the sandbox is still stopped. Check logs before continuing.',
-      data: {
-        ...result,
-        status: sandboxStatus || null,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: '❌ Failed to restart dev server',
-      error: String(error),
-    };
-  }
+      return {
+        success: Boolean(running),
+        message: running
+          ? `✅ Dev server restarted!\n\nURL: ${result.url}`
+          : '⚠️ Dev server command returned but the sandbox is still stopped. Check logs before continuing.',
+        data: {
+          ...result,
+          status: sandboxStatus || null,
+        },
+      };
+    },
+    {
+      retries: 1,
+      timeout: 30000, // 30 second timeout for dev server restart
+    }
+  );
 }
 
 async function stopDevServer(): Promise<ToolResult> {
-  try {
-    const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+  // Pre-flight validation
+  const { activeProjectId } = useIDEStore.getState();
+  const projectValidation = validateActiveProject(activeProjectId);
+  if (!projectValidation.valid) {
+    return validationResultToError(projectValidation, 'NO_ACTIVE_PROJECT').toToolResult();
+  }
 
-    if (!activeProjectId) {
-      return {
-        success: false,
-        message: 'No active project',
-        error: 'Select or create a project first',
-      };
-    }
+  return executeTool(
+    'stop_dev_server',
+    async () => {
+      const { activeProjectId, addConsoleMessage, setSandboxUrl } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
     addConsoleMessage?.('info', '🛑 Stopping dev server...');
 
@@ -669,18 +728,17 @@ async function stopDevServer(): Promise<ToolResult> {
       };
     }
 
-    return {
-      success: true,
-      message: 'ℹ️ Dev server was not running',
-      data: result,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: '❌ Failed to stop dev server',
-      error: String(error),
-    };
-  }
+      return {
+        success: true,
+        message: 'ℹ️ Dev server was not running',
+        data: result,
+      };
+    },
+    {
+      retries: 1,
+      timeout: 10000, // 10 second timeout
+    }
+  );
 }
 
 async function bootstrapNextJS(useTypeScript: boolean = true, useTailwind: boolean = true): Promise<ToolResult> {
@@ -873,16 +931,25 @@ export default config;`,
 }
 
 async function readSandboxFiles(path?: string): Promise<ToolResult> {
-  try {
-    const { activeProjectId, updateFile, addFile, addConsoleMessage } = useIDEStore.getState();
+  // Pre-flight validation
+  const { activeProjectId } = useIDEStore.getState();
+  const projectValidation = validateActiveProject(activeProjectId);
+  if (!projectValidation.valid) {
+    return validationResultToError(projectValidation, 'NO_ACTIVE_PROJECT').toToolResult();
+  }
 
-    if (!activeProjectId) {
-      return {
-        success: false,
-        message: 'No active project',
-        error: 'Select or create a project first',
-      };
-    }
+  return executeTool(
+    'read_sandbox_files',
+    async () => {
+      const { activeProjectId, updateFile, addFile, addConsoleMessage } = useIDEStore.getState();
+
+      if (!activeProjectId) {
+        return {
+          success: false,
+          message: 'No active project',
+          error: 'Select or create a project first',
+        };
+      }
 
     addConsoleMessage?.('info', `📥 Reading files from sandbox${path ? ` (${path})` : ''}...`);
 
@@ -948,18 +1015,17 @@ async function readSandboxFiles(path?: string): Promise<ToolResult> {
 
     addConsoleMessage?.('success', `✅ Synced ${fileCount} files from sandbox`);
 
-    return {
-      success: true,
-      message: `✅ Read ${fileCount} files from sandbox and synced to IDE`,
-      data: { files, count: fileCount },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: '❌ Failed to read sandbox files',
-      error: String(error),
-    };
-  }
+      return {
+        success: true,
+        message: `✅ Read ${fileCount} files from sandbox and synced to IDE`,
+        data: { files, count: fileCount },
+      };
+    },
+    {
+      retries: 1,
+      timeout: 20000, // 20 second timeout
+    }
+  );
 }
 
 async function getSandboxLogs(lines: number = 50): Promise<ToolResult> {

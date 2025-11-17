@@ -15,7 +15,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import { Sparkles, Send, Loader2, Trash2, Code2, Globe, Square, Copy } from 'lucide-react';
 import { useIDEStore } from '@/store/ide-store';
-import { blueprintTools, fileTools, beamTools, syncDApp } from '@/lib/tools';
+import { blueprintTools, fileTools, beamTools, syncDApp, enhanceResultWithRecovery, createRecoveryContext, updateRecoveryContext } from '@/lib/tools';
 import { Conversation, ConversationContent, ConversationScrollButton, ConversationEmptyState } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
@@ -65,6 +65,9 @@ export const AgenticChatUnified: React.FC = () => {
   // Map format: "toolName:argsHash" -> failure count
   const failedToolCallsRef = useRef<Map<string, number>>(new Map());
   const MAX_RETRIES_PER_TOOL = 2; // Allow 2 attempts, block the 3rd
+
+  // Track error recovery contexts
+  const recoveryContextsRef = useRef<Map<string, ReturnType<typeof createRecoveryContext>>>(new Map());
 
   const planPhaseRef = useRef<ConversationPhase>('idle');
   const planConfirmedRef = useRef(false);
@@ -248,6 +251,14 @@ export const AgenticChatUnified: React.FC = () => {
             result = await fileTools.deleteFile(args.path);
             break;
 
+          case 'batch_write_files':
+            result = await fileTools.batchWriteFiles(args.files || []);
+            break;
+
+          case 'batch_read_files':
+            result = await fileTools.batchReadFiles(args.paths || []);
+            break;
+
           case 'get_project_structure':
             result = await fileTools.getProjectStructure(args.filterByType);
             break;
@@ -398,22 +409,39 @@ export const AgenticChatUnified: React.FC = () => {
         // Log to console
         if (result.success) {
           addConsoleMessage('success', result.message);
-          // SUCCESS: Clear failure count for this tool call
+          // SUCCESS: Clear failure count and recovery context for this tool call
           failedToolCallsRef.current.delete(toolCallKey);
+          recoveryContextsRef.current.delete(toolCallKey);
         } else {
           addConsoleMessage('error', result.message);
-          // FAILURE: Increment failure count for this exact tool call
+          // FAILURE: Track recovery context and increment failure count
+          let recoveryContext = recoveryContextsRef.current.get(toolCallKey);
+          if (!recoveryContext) {
+            recoveryContext = createRecoveryContext(toolName, args, result.error || result.message);
+            recoveryContextsRef.current.set(toolCallKey, recoveryContext);
+          } else {
+            recoveryContext = updateRecoveryContext(recoveryContext, result.error || result.message);
+            recoveryContextsRef.current.set(toolCallKey, recoveryContext);
+          }
+
+          // Enhance result with recovery suggestions
+          const enhancedResult = enhanceResultWithRecovery(result, recoveryContext);
+
           const newFailureCount = (failedToolCallsRef.current.get(toolCallKey) || 0) + 1;
           failedToolCallsRef.current.set(toolCallKey, newFailureCount);
           console.warn(`⚠️ Tool failure #${newFailureCount} for:`, toolName, args);
+          console.warn(`💡 Recovery suggestions:`, enhancedResult.warnings);
+
+          // Use enhanced result with recovery suggestions
+          result = enhancedResult;
         }
 
-        // CRITICAL: Send the FULL result (including success, message, error) to the LLM
-        // Not just result.data! The LLM needs to see error messages to avoid retry loops
+        // CRITICAL: Send the FULL result (including success, message, error, warnings) to the LLM
+        // Not just result.data! The LLM needs to see error messages and recovery suggestions
         addToolResult({
           tool: toolCall.toolName,
           toolCallId: toolCall.toolCallId,
-          output: result, // Send full result object, not just result.data
+          output: result, // Send full result object with recovery suggestions
         });
 
         // Return result (required by AI SDK)
@@ -422,16 +450,28 @@ export const AgenticChatUnified: React.FC = () => {
         console.error('Tool execution error:', error);
         addConsoleMessage('error', `❌ Tool error: ${error.message}`);
 
-        // EXCEPTION: Also track as failure
+        // EXCEPTION: Track recovery context and increment failure count
+        let recoveryContext = recoveryContextsRef.current.get(toolCallKey);
+        if (!recoveryContext) {
+          recoveryContext = createRecoveryContext(toolName, args, error);
+          recoveryContextsRef.current.set(toolCallKey, recoveryContext);
+        } else {
+          recoveryContext = updateRecoveryContext(recoveryContext, error);
+          recoveryContextsRef.current.set(toolCallKey, recoveryContext);
+        }
+
         const newFailureCount = (failedToolCallsRef.current.get(toolCallKey) || 0) + 1;
         failedToolCallsRef.current.set(toolCallKey, newFailureCount);
         console.warn(`⚠️ Tool exception #${newFailureCount} for:`, toolName, args);
 
-        const errorResult = {
-          success: false,
-          message: `Tool execution failed: ${error.message}`,
-          error: error.stack || error.toString(),
-        };
+        const errorResult = enhanceResultWithRecovery(
+          {
+            success: false,
+            message: `Tool execution failed: ${error.message}`,
+            error: error.stack || error.toString(),
+          },
+          recoveryContext
+        );
 
         addToolResult({
           tool: toolCall.toolName,
@@ -465,6 +505,7 @@ export const AgenticChatUnified: React.FC = () => {
     setLocalInput('');
     toolRoundCounterRef.current = 0;
     failedToolCallsRef.current.clear(); // Reset failure tracking on clear
+    recoveryContextsRef.current.clear(); // Reset recovery contexts on clear
     planPhaseRef.current = 'idle';
     planConfirmedRef.current = false;
     toolsStepStartedRef.current = false;
