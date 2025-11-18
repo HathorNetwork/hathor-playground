@@ -2,14 +2,34 @@ import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import { Contract } from '@/lib/api';
 import { storage, initStorage, StoredFile, ChatSession, ChatMessage } from '@/lib/storage';
+import { SAMPLE_PROJECTS } from './sample-projects';
+
+export type FileType = 'contract' | 'test' | 'component' | 'hook' | 'style' | 'config';
+export type FileLanguage = 'python' | 'typescript' | 'typescriptreact' | 'css' | 'json';
 
 export interface File {
   id: string;
   name: string;
   content: string;
-  language: string;
+  language: FileLanguage;
   path: string;
-  type?: 'contract' | 'test';
+  type: FileType;
+}
+
+export interface FolderNode {
+  name: string;
+  path: string;
+  files: File[];
+  subfolders: FolderNode[];
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  files: File[];
+  created: number;
+  lastModified: number;
 }
 
 export interface ConsoleMessage {
@@ -27,7 +47,11 @@ export interface ContractInstance {
 }
 
 interface IDEState {
-  // Files
+  // Projects
+  projects: Project[];
+  activeProjectId: string | null;
+
+  // Files (derived from active project)
   files: File[];
   openFileIds: string[];
   activeFileId: string | null;
@@ -50,9 +74,19 @@ interface IDEState {
   isExecuting: boolean;
   isRunningTests: boolean;
   isStorageInitialized: boolean;
+  sandboxUrls: Record<string, string | null>;
+  initialSyncCompleted: Record<string, boolean>; // Track which projects have had initial dApp sync
+  initialSyncInProgress: Record<string, boolean>; // Track in-progress syncs
 
-  // Actions
-  addFile: (file: File) => void;
+  // Project actions
+  createProject: (name: string, description?: string) => string;
+  deleteProject: (id: string) => void;
+  setActiveProject: (id: string) => void;
+  updateProjectName: (id: string, name: string) => void;
+  getActiveProject: () => Project | null;
+
+  // File actions
+  addFile: (file: Omit<File, 'id'>) => void;
   updateFile: (id: string, content: string) => void;
   deleteFile: (id: string) => void;
   setActiveFile: (id: string) => void;
@@ -86,686 +120,786 @@ interface IDEState {
   saveFileToStorage: (file: File) => Promise<void>;
   deleteFileFromStorage: (id: string) => Promise<void>;
   loadChatSessionsFromStorage: () => Promise<void>;
+
+  setSandboxUrl: (projectId: string, url: string | null) => void;
+  getSandboxUrlValue: (projectId: string) => string | null;
+
 }
 
-const createIDEStore: StateCreator<IDEState> = (set, get) => ({
-  // Initial state
-  files: [
-    {
-      id: '1',
-      name: 'SimpleCounter.py',
-      content: `from hathor import Blueprint, Context, NCFail, export, public, view
-
-@export
-class SimpleCounter(Blueprint):
-    """A simple counter that can be incremented and read"""
-
-    # Contract state
-    count: int
-
-    @public
-    def initialize(self, ctx: Context) -> None:
-        """Initialize the counter"""
-        self.count = 0
-
-    @public
-    def increment(self, ctx: Context, amount: int) -> None:
-        """Increment the counter by the specified amount"""
-        if amount <= 0:
-            raise NegativeIncrement("Amount must be positive")
-
-        self.count += amount
-
-    @view
-    def get_count(self) -> int:
-        """Get the current counter value"""
-        return self.count
-
-    @public
-    def reset(self, ctx: Context) -> None:
-        """Reset the counter to zero"""
-        self.count = 0
-
-
-class NegativeIncrement(NCFail):
-    pass
-`,
-      language: 'python',
-      path: '/contracts/SimpleCounter.py',
-      type: 'contract',
-    },
-    {
-      id: '2',
-      name: 'test_simple_counter.py',
-      content: `from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
-
-
-COUNTER_NC_TYPE = make_nc_type(int)
-
-
-class CounterTestCase(BlueprintTestCase):
-    def setUp(self):
-        super().setUp()
-
-        self.blueprint_id = self.gen_random_blueprint_id()
-        self.contract_id = self.gen_random_contract_id()
-        self.address = self.gen_random_address()
-
-        self.nc_catalog.blueprints[self.blueprint_id] = SimpleCounter
-        self.tx = self.get_genesis_tx()
-
-
-    def test_lifecycle(self) -> None:
-        context = self.create_context(
-            vertex=self.tx,
-            caller_id=self.address,
-            timestamp=self.now
-        )
-
-        # Create a contract.
-        self.runner.create_contract(
-            self.contract_id,
-            self.blueprint_id,
-            context,
-        )
-
-        self.nc_storage = self.runner.get_storage(self.contract_id)
-
-        self.assertEqual(0, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))
-
-        # increment
-        AMOUNT = 3
-        self.runner.call_public_method(self.contract_id, 'increment', context, AMOUNT)
-        self.assertEqual(AMOUNT, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))
-
-        # call get_count
-        ret = self.runner.call_view_method(self.contract_id, 'get_count')
-        self.assertEqual(AMOUNT, ret)
-
-        with self.assertRaises(NegativeIncrement):
-            self.runner.call_public_method(self.contract_id, 'increment', context, -2)
-
-        # reset
-        self.runner.call_public_method(self.contract_id, 'reset', context)
-        self.assertEqual(0, self.nc_storage.get_obj(b'count', COUNTER_NC_TYPE))`,
-      language: 'python',
-      path: '/tests/test_simple_counter.py',
-      type: 'test',
-    },
-    {
-      id: '3',
-      name: 'SwapDemo.py',
-      content: `from hathor import Blueprint, Context, NCDepositAction, NCFail, NCWithdrawalAction, TokenUid, export, public, view
-
-@export
-class SwapDemo(Blueprint):
-    """Blueprint to execute swaps between tokens.
-    This blueprint is here just as a reference for blueprint developers, not for real use.
-    """
-
-    # TokenA identifier and quantity multiplier.
-    token_a: TokenUid
-    multiplier_a: int
-
-    # TokenB identifier and quantity multiplier.
-    token_b: TokenUid
-    multiplier_b: int
-
-    # Count number of swaps executed.
-    swaps_counter: int
-
-    @public(allow_deposit=True)
-    def initialize(
-        self,
-        ctx: Context,
-        token_a: TokenUid,
-        token_b: TokenUid,
-        multiplier_a: int,
-        multiplier_b: int
-    ) -> None:
-        """Initialize the contract."""
-
-        if token_a == token_b:
-            raise NCFail
-
-        if set(ctx.actions.keys()) != {token_a, token_b}:
-            raise InvalidTokens
-
-        self.token_a = token_a
-        self.token_b = token_b
-        self.multiplier_a = multiplier_a
-        self.multiplier_b = multiplier_b
-        self.swaps_counter = 0
-
-    @public(allow_deposit=True, allow_withdrawal=True)
-    def swap(self, ctx: Context) -> None:
-        """Execute a token swap."""
-
-        if set(ctx.actions.keys()) != {self.token_a, self.token_b}:
-            raise InvalidTokens
-
-        action_a = ctx.get_single_action(self.token_a)
-        action_b = ctx.get_single_action(self.token_b)
-
-        if not (
-            (isinstance(action_a, NCDepositAction) and isinstance(action_b, NCWithdrawalAction))
-            or (isinstance(action_a, NCWithdrawalAction) and isinstance(action_b, NCDepositAction))
-        ):
-            raise InvalidActions
-
-        if not self.is_ratio_valid(action_a.amount, action_b.amount):
-            raise InvalidRatio
-
-        # All good! Let's accept the transaction.
-        self.swaps_counter += 1
-
-    @view
-    def is_ratio_valid(self, qty_a: int, qty_b: int) -> bool:
-        """Check if the swap quantities are valid."""
-        return (self.multiplier_a * qty_a == self.multiplier_b * qty_b)
-
-
-class InvalidTokens(NCFail):
-    pass
-
-
-class InvalidActions(NCFail):
-    pass
-
-
-class InvalidRatio(NCFail):
-    pass
-      `,
-      language: 'python',
-      path: '/contracts/SwapDemo.py',
-      type: 'contract',
-    },
-    {
-      id: '4',
-      name: 'test_swap_demo.py',
-      content: `from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
-from hathor.nanocontracts.storage.contract_storage import Balance
-from hathor.nanocontracts.types import NCDepositAction, NCWithdrawalAction, TokenUid
-
-
-SWAP_NC_TYPE = make_nc_type(int)
-
-
-class SwapDemoTestCase(BlueprintTestCase):
-    def setUp(self):
-        super().setUp()
-
-        self.blueprint_id = self.gen_random_blueprint_id()
-        self.contract_id = self.gen_random_contract_id()
-
-        self.nc_catalog.blueprints[self.blueprint_id] = SwapDemo
-
-        # Test doubles:
-        self.token_a = self.gen_random_token_uid()
-        self.token_b = self.gen_random_token_uid()
-        self.token_c = self.gen_random_token_uid()
-        self.address = self.gen_random_address()
-        self.tx = self.get_genesis_tx()
-
-    def _initialize(
-        self,
-        init_token_a: tuple[TokenUid, int, int],
-        init_token_b: tuple[TokenUid, int, int]
-    ) -> None:
-        # Arrange:
-        token_a, multiplier_a, amount_a = init_token_a
-        token_b, multiplier_b, amount_b = init_token_b
-        deposit_a = NCDepositAction(token_uid=token_a, amount=amount_a)
-        deposit_b = NCDepositAction(token_uid=token_b, amount=amount_b)
-        context = self.create_context(
-            actions=[deposit_a, deposit_b],
-            vertex=self.tx,
-            caller_id=self.address,
-            timestamp=self.now
-        )
-
-        # Act:
-        self.runner.create_contract(
-            self.contract_id,
-            self.blueprint_id,
-            context,
-            token_a,
-            token_b,
-            multiplier_a,
-            multiplier_b,
-        )
-        self.nc_storage = self.runner.get_storage(self.contract_id)
-
-    def _swap(
-        self,
-        amount_a: tuple[int, TokenUid],
-        amount_b: tuple[int, TokenUid]
-    ) -> None:
-        # Arrange:
-        value_a, token_a = amount_a
-        value_b, token_b = amount_b
-        action_a_type = self.get_action_type(value_a)
-        action_b_type = self.get_action_type(value_b)
-        swap_a = action_a_type(token_uid=token_a, amount=abs(value_a))
-        swap_b = action_b_type(token_uid=token_b, amount=abs(value_b))
-        context = self.create_context(
-            actions=[swap_a, swap_b],
-            vertex=self.tx,
-            caller_id=self.address,
-            timestamp=self.now
-        )
-
-        # Act:
-        self.runner.call_public_method(self.contract_id, 'swap', context)
-
-    def test_lifecycle(self) -> None:
-        # Create a contract.
-        # Arrange and act within:
-        self._initialize((self.token_a, 1, 100_00), (self.token_b, 1, 100_00))
-
-        # Assert:
-        self.assertEqual(
-            Balance(value=100_00, can_mint=False, can_melt=False), self.nc_storage.get_balance(self.token_a)
-        )
-        self.assertEqual(
-            Balance(value=100_00, can_mint=False, can_melt=False), self.nc_storage.get_balance(self.token_b)
-        )
-        self.assertEqual(0, self.nc_storage.get_obj(b'swaps_counter', SWAP_NC_TYPE))
-
-        # Make a valid swap.
-        # Arrange and act within:
-        self._swap((20_00, self.token_a), (-20_00, self.token_b))
-        # Assert:
-        self.assertEqual(
-            Balance(value=120_00, can_mint=False, can_melt=False), self.nc_storage.get_balance(self.token_a)
-        )
-        self.assertEqual(
-            Balance(value=80_00, can_mint=False, can_melt=False), self.nc_storage.get_balance(self.token_b)
-        )
-        self.assertEqual(1, self.nc_storage.get_obj(b'swaps_counter', SWAP_NC_TYPE))
-
-        # Make multiple invalid swaps raising all possible exceptions.
-        with self.assertRaises(InvalidTokens):
-            self._swap((-20_00, self.token_a), (20_00, self.token_c))
-        with self.assertRaises(InvalidActions):
-            self._swap((20_00, self.token_a), (40_00, self.token_b))
-        with self.assertRaises(InvalidRatio):
-            self._swap((20_00, self.token_a), (-40_00, self.token_b))
-
-    def get_action_type(self, amount: int) -> type[NCDepositAction] | type[NCWithdrawalAction]:
-        if amount >= 0:
-            return NCDepositAction
-        else:
-            return NCWithdrawalAction
-`,
-      language: 'python',
-      path: '/tests/test_swap_demo.py',
-      type: 'test',
-    },
-  ],
-  openFileIds: ['1'],
-  activeFileId: '1',
-
-  consoleMessages: [],
-  messageIdCounter: 0,
-  lastExecutionLogs: null,
-  compiledContracts: [],
-  contractInstances: {},
-
-  chatSessions: [],
-  activeChatSessionId: null,
-
-  isCompiling: false,
-  isExecuting: false,
-  isRunningTests: false,
-  isStorageInitialized: false,
-
-  // Actions
-  addFile: (file) => {
-    set((state) => ({
-      files: [...state.files, file],
-      openFileIds: [...state.openFileIds, file.id],
-      activeFileId: file.id,
-    }));
-    // Auto-persist to storage
-    const state = get();
-    if (state.isStorageInitialized) {
-      state.saveFileToStorage(file).catch(console.error);
-    }
-  },
-
-  updateFile: (id, content) => {
-    set((state) => ({
-      files: state.files.map((f) =>
-        f.id === id ? { ...f, content } : f
-      ),
-    }));
-    // Auto-persist to storage
-    const state = get();
-    if (state.isStorageInitialized) {
-      const updatedFile = state.files.find(f => f.id === id);
-      if (updatedFile) {
-        state.saveFileToStorage(updatedFile).catch(console.error);
+// Helper: Build folder tree from flat file list
+export function buildFolderTree(files: File[]): FolderNode {
+  const root: FolderNode = {
+    name: '',
+    path: '/',
+    files: [],
+    subfolders: []
+  };
+
+  files.forEach(file => {
+    const parts = file.path.split('/').filter(p => p.length > 0);
+    let current = root;
+
+    // Navigate/create folder path
+    for (let i = 0; i < parts.length - 1; i++) {
+      const folderName = parts[i];
+      let folder = current.subfolders.find(f => f.name === folderName);
+
+      if (!folder) {
+        folder = {
+          name: folderName,
+          path: '/' + parts.slice(0, i + 1).join('/'),
+          files: [],
+          subfolders: []
+        };
+        current.subfolders.push(folder);
       }
-    }
-  },
 
-  deleteFile: (id) => {
-    set((state) => {
+      current = folder;
+    }
+
+    // Add file to leaf folder
+    current.files.push(file);
+  });
+
+  return root;
+}
+
+// Helper: Save projects to localStorage
+function saveProjectsToLocalStorage(projects: Project[], activeProjectId: string | null) {
+  try {
+    localStorage.setItem('hathor-projects', JSON.stringify(projects));
+    if (activeProjectId) {
+      localStorage.setItem('hathor-active-project-id', activeProjectId);
+    }
+    console.log('Projects saved to localStorage');
+  } catch (error) {
+    console.error('Failed to save projects to localStorage:', error);
+  }
+}
+
+// Helper: Save initial sync state to localStorage
+function saveInitialSyncState(syncState: Record<string, boolean>) {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('hathor-initial-sync-completed', JSON.stringify(syncState));
+    }
+  } catch (error) {
+    console.error('Failed to save initial sync state to localStorage:', error);
+  }
+}
+
+const createIDEStore: StateCreator<IDEState> = (set, get) => {
+  // Initialize with sample projects
+  const initialProjects = SAMPLE_PROJECTS;
+  const initialActiveProjectId = initialProjects[0]?.id || null;
+  const initialFiles = initialProjects[0]?.files || [];
+
+  return {
+    // Initial state - Projects
+    projects: initialProjects,
+    activeProjectId: initialActiveProjectId,
+
+    // Initial state - Files (from active project)
+    files: initialFiles,
+    openFileIds: initialFiles[0] ? [initialFiles[0].id] : [],
+    activeFileId: initialFiles[0]?.id || null,
+
+    // Rest of initial state
+    consoleMessages: [],
+    messageIdCounter: 0,
+    lastExecutionLogs: null,
+    compiledContracts: [],
+    contractInstances: {},
+    chatSessions: [],
+    activeChatSessionId: null,
+    isCompiling: false,
+    isExecuting: false,
+    isRunningTests: false,
+    isStorageInitialized: false,
+    sandboxUrls: {},
+    initialSyncCompleted: (() => {
+      // Load from localStorage if available
+      if (typeof window !== 'undefined') {
+        try {
+          const stored = localStorage.getItem('hathor-initial-sync-completed');
+          return stored ? JSON.parse(stored) : {};
+        } catch {
+          return {};
+        }
+      }
+      return {};
+    })(),
+    initialSyncInProgress: {},
+
+    // Project actions
+    createProject: (name, description) => {
+      // New projects start empty - LLM will generate files when integrated with Beam
+      const newProject: Project = {
+        id: `project-${Date.now()}`,
+        name,
+        description,
+        files: [],
+        created: Date.now(),
+        lastModified: Date.now(),
+      };
+
+      set((state) => {
+        const newProjects = [...state.projects, newProject];
+        saveProjectsToLocalStorage(newProjects, newProject.id);
+
+        return {
+          projects: newProjects,
+          activeProjectId: newProject.id,
+          files: [],
+          openFileIds: [],
+          activeFileId: null,
+        };
+      });
+
+      return newProject.id;
+    },
+
+    deleteProject: (id) => {
+      set((state) => {
+        const newProjects = state.projects.filter((p) => p.id !== id);
+        const wasActive = state.activeProjectId === id;
+
+        // Clean up sync state for deleted project
+        const updatedSyncState = { ...state.initialSyncCompleted };
+        delete updatedSyncState[id];
+        saveInitialSyncState(updatedSyncState);
+
+        if (wasActive && newProjects.length > 0) {
+          // Switch to first remaining project
+          const newActiveProject = newProjects[0];
+          return {
+            projects: newProjects,
+            activeProjectId: newActiveProject.id,
+            files: newActiveProject.files,
+            openFileIds: newActiveProject.files[0] ? [newActiveProject.files[0].id] : [],
+            activeFileId: newActiveProject.files[0]?.id || null,
+            initialSyncCompleted: updatedSyncState,
+          };
+        }
+
+        return {
+          projects: newProjects,
+          activeProjectId: wasActive ? null : state.activeProjectId,
+          initialSyncCompleted: updatedSyncState,
+        };
+      });
+    },
+
+    setActiveProject: (id) => {
+      const state = get();
+      const project = state.projects.find((p) => p.id === id);
+
+      if (project) {
+        set({
+          activeProjectId: id,
+          files: project.files,
+          openFileIds: project.files[0] ? [project.files[0].id] : [],
+          activeFileId: project.files[0]?.id || null,
+        });
+
+        // Trigger initial dApp sync if not already done (client-side only)
+        if (typeof window !== 'undefined' &&
+            !state.initialSyncCompleted[id] &&
+            !state.initialSyncInProgress[id]) { // Check if already in progress
+
+          // Mark sync as in progress
+          set((state) => ({
+            initialSyncInProgress: {
+              ...state.initialSyncInProgress,
+              [id]: true,
+            },
+          }));
+
+          // Use setTimeout to avoid blocking the state update
+          setTimeout(async () => {
+            // Double-check inside timeout to prevent race conditions
+            const currentState = get();
+            if (currentState.initialSyncInProgress[id]) {
+              console.log('[SYNC] Sync already in progress, skipping duplicate');
+              return;
+            }
+
+            try {
+              // Dynamically import to avoid SSR issues
+              const { syncDApp } = await import('@/lib/tools/sync');
+              const { addConsoleMessage } = get();
+
+              addConsoleMessage?.('info', `🔄 Auto-syncing pre-scaffolded dApp for project "${project.name}"...`);
+
+              const result = await syncDApp('sandbox-to-ide', id);
+
+              if (result.success) {
+                const currentState = get();
+                const updatedSyncState = {
+                  ...currentState.initialSyncCompleted,
+                  [id]: true,
+                };
+                const updatedProgressState = {
+                  ...currentState.initialSyncInProgress,
+                  [id]: false,
+                };
+
+                set({
+                  initialSyncCompleted: updatedSyncState,
+                  initialSyncInProgress: updatedProgressState,
+                });
+                saveInitialSyncState(updatedSyncState);
+
+                addConsoleMessage?.('success', `✅ Initial dApp sync completed for "${project.name}"`);
+              } else {
+                // Mark sync as complete even on failure to avoid infinite retries
+                set((state) => ({
+                  initialSyncInProgress: {
+                    ...state.initialSyncInProgress,
+                    [id]: false,
+                  },
+                }));
+                addConsoleMessage?.('warning', `⚠️ Initial sync had issues: ${result.message || result.error}`);
+              }
+            } catch (error: any) {
+              const { addConsoleMessage } = get();
+              // Mark sync as complete on error
+              set((state) => ({
+                initialSyncInProgress: {
+                  ...state.initialSyncInProgress,
+                  [id]: false,
+                },
+              }));
+              addConsoleMessage?.('error', `❌ Failed to auto-sync dApp: ${error?.message || String(error)}`);
+            }
+          }, 100); // Small delay to ensure state is updated
+        }
+      }
+    },
+
+    updateProjectName: (id, name) => {
+      set((state) => ({
+        projects: state.projects.map((p) =>
+          p.id === id ? { ...p, name, lastModified: Date.now() } : p
+        ),
+      }));
+    },
+
+    getActiveProject: () => {
+      const state = get();
+      return state.projects.find((p) => p.id === state.activeProjectId) || null;
+    },
+
+    // File actions (updated to work with projects)
+    addFile: (file) => {
+      const state = get();
+      const activeProject = state.getActiveProject();
+
+      if (!activeProject) return;
+
+      // Generate unique ID for the new file
+      const fileWithId: File = {
+        ...file,
+        id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      };
+
+      // Update project's files
+      const updatedProjects = state.projects.map((p) =>
+        p.id === activeProject.id
+          ? { ...p, files: [...p.files, fileWithId], lastModified: Date.now() }
+          : p
+      );
+
+      // Save to localStorage
+      saveProjectsToLocalStorage(updatedProjects, state.activeProjectId);
+
+      set({
+        projects: updatedProjects,
+        files: [...state.files, fileWithId],
+        openFileIds: [...state.openFileIds, fileWithId.id],
+        activeFileId: fileWithId.id,
+      });
+
+      // Auto-persist to storage
+      if (state.isStorageInitialized) {
+        state.saveFileToStorage(fileWithId).catch(console.error);
+      }
+
+    },
+
+    updateFile: (id, content) => {
+      const state = get();
+      const activeProject = state.getActiveProject();
+
+      if (!activeProject) return;
+
+      // Update project's files
+      const updatedProjects = state.projects.map((p) =>
+        p.id === activeProject.id
+          ? {
+              ...p,
+              files: p.files.map((f) => (f.id === id ? { ...f, content } : f)),
+              lastModified: Date.now(),
+            }
+          : p
+      );
+
+      // Save to localStorage
+      saveProjectsToLocalStorage(updatedProjects, state.activeProjectId);
+
+      set({
+        projects: updatedProjects,
+        files: state.files.map((f) => (f.id === id ? { ...f, content } : f)),
+      });
+
+      // Get the updated file
+      const updatedFile = state.files.find((f) => f.id === id);
+      if (updatedFile) {
+        const fileWithNewContent = { ...updatedFile, content };
+
+        // Auto-persist to storage
+        if (state.isStorageInitialized) {
+          state.saveFileToStorage(fileWithNewContent).catch(console.error);
+        }
+
+      }
+    },
+
+    deleteFile: (id) => {
+      const state = get();
+      const activeProject = state.getActiveProject();
+
+      if (!activeProject) return;
+
+      // Update project's files
+      const updatedProjects = state.projects.map((p) =>
+        p.id === activeProject.id
+          ? {
+              ...p,
+              files: p.files.filter((f) => f.id !== id),
+              lastModified: Date.now(),
+            }
+          : p
+      );
+
+      // Save to localStorage
+      saveProjectsToLocalStorage(updatedProjects, state.activeProjectId);
+
       const newOpenFileIds = state.openFileIds.filter((fileId) => fileId !== id);
       let newActiveFileId = state.activeFileId;
+
       if (state.activeFileId === id) {
         const closingTabIndex = state.openFileIds.indexOf(id);
-        newActiveFileId = newOpenFileIds[closingTabIndex] || newOpenFileIds[newOpenFileIds.length - 1] || null;
+        newActiveFileId =
+          newOpenFileIds[closingTabIndex] ||
+          newOpenFileIds[newOpenFileIds.length - 1] ||
+          null;
       }
-      return {
+
+      set({
+        projects: updatedProjects,
         files: state.files.filter((f) => f.id !== id),
         openFileIds: newOpenFileIds,
         activeFileId: newActiveFileId,
-      };
-    });
-    // Delete from storage
-    const state = get();
-    if (state.isStorageInitialized) {
-      state.deleteFileFromStorage(id).catch(console.error);
-    }
-  },
+      });
 
-  setActiveFile: (id) => {
-    set({ activeFileId: id });
-    // Save active file preference
-    const state = get();
-    if (state.isStorageInitialized) {
-      storage.setPreference('lastActiveFileId', id).catch(console.error);
-    }
-  },
-
-  openFile: (fileId) => {
-    set((state) => {
-      if (!state.openFileIds.includes(fileId)) {
-        return {
-          openFileIds: [...state.openFileIds, fileId],
-          activeFileId: fileId,
-        };
+      // Delete from storage
+      if (state.isStorageInitialized) {
+        state.deleteFileFromStorage(id).catch(console.error);
       }
-      return { activeFileId: fileId };
-    });
-  },
+    },
 
-  closeFile: (fileId) => {
-    set((state) => {
-      const newOpenFileIds = state.openFileIds.filter((id) => id !== fileId);
-      let newActiveFileId = state.activeFileId;
-      if (state.activeFileId === fileId) {
-        const closingTabIndex = state.openFileIds.indexOf(fileId);
-        newActiveFileId = newOpenFileIds[closingTabIndex] || newOpenFileIds[newOpenFileIds.length - 1] || null;
-      }
-      return {
-        openFileIds: newOpenFileIds,
-        activeFileId: newActiveFileId,
-      };
-    });
-  },
-
-  reorderFiles: (fromIndex, toIndex) => {
-    set((state) => {
-      const newOpenFileIds = [...state.openFileIds];
-      const [movedItem] = newOpenFileIds.splice(fromIndex, 1);
-      newOpenFileIds.splice(toIndex, 0, movedItem);
-      return { openFileIds: newOpenFileIds };
-    });
-  },
-
-  addConsoleMessage: (type, message) =>
-    set((state) => ({
-      consoleMessages: [
-        ...state.consoleMessages,
-        {
-          id: `console-${++state.messageIdCounter}-${Date.now()}`,
-          type,
-          message,
-          timestamp: new Date(),
-        },
-      ],
-      messageIdCounter: state.messageIdCounter + 1,
-    })),
-
-  clearConsole: () =>
-    set(() => ({
-      consoleMessages: [],
-      messageIdCounter: 0,
-      lastExecutionLogs: null,
-    })),
-
-  setLastExecutionLogs: (logs) => set(() => ({ lastExecutionLogs: logs })),
-
-  addCompiledContract: (contract) =>
-    set((state) => ({
-      compiledContracts: [...state.compiledContracts, contract],
-    })),
-
-  addContractInstance: (fileId: string, instance: ContractInstance) =>
-    set((state) => ({
-      contractInstances: {
-        ...state.contractInstances,
-        [fileId]: instance,
-      },
-    })),
-
-  getContractInstance: (fileId: string) => {
-    const state = get();
-    return state.contractInstances[fileId] || null;
-  },
-
-  clearContractInstances: () =>
-    set(() => ({
-      contractInstances: {},
-    })),
-
-  setIsCompiling: (value) =>
-    set(() => ({
-      isCompiling: value,
-    })),
-
-  setIsExecuting: (value) =>
-    set(() => ({
-      isExecuting: value,
-    })),
-
-  setIsRunningTests: (value) =>
-    set(() => ({
-      isRunningTests: value,
-    })),
-
-  // Chat session actions
-  createChatSession: () => {
-    const sessionId = Date.now().toString();
-    const newSession: ChatSession = {
-      id: sessionId,
-      messages: [],
-      created: Date.now(),
-      lastModified: Date.now(),
-      title: 'New Chat Session'
-    };
-
-    set((state) => ({
-      chatSessions: [...state.chatSessions, newSession],
-      activeChatSessionId: sessionId,
-    }));
-
-    // Save to storage
-    const state = get();
-    if (state.isStorageInitialized) {
-      storage.saveChatSession(newSession).catch(console.error);
-    }
-
-    return sessionId;
-  },
-
-  addChatMessage: (sessionId, message) => {
-    set((state) => ({
-      chatSessions: state.chatSessions.map(session =>
-        session.id === sessionId
-          ? {
-            ...session,
-            messages: [...session.messages, message],
-            lastModified: Date.now(),
-          }
-          : session
-      ),
-    }));
-
-    // Save to storage
-    const state = get();
-    if (state.isStorageInitialized) {
-      const updatedSession = state.chatSessions.find(s => s.id === sessionId);
-      if (updatedSession) {
-        storage.saveChatSession(updatedSession).catch(console.error);
-      }
-    }
-  },
-
-  getChatSession: (id) => {
-    const state = get();
-    return state.chatSessions.find(session => session.id === id) || null;
-  },
-
-  setActiveChatSession: (id) => {
-    set(() => ({
-      activeChatSessionId: id,
-    }));
-
-    // Save active session preference
-    const state = get();
-    if (state.isStorageInitialized) {
-      storage.setPreference('activeChatSessionId', id).catch(console.error);
-    }
-  },
-
-  deleteChatSession: (id) => {
-    set((state) => ({
-      chatSessions: state.chatSessions.filter(session => session.id !== id),
-      activeChatSessionId: state.activeChatSessionId === id ? null : state.activeChatSessionId,
-    }));
-
-    // Delete from storage
-    const state = get();
-    if (state.isStorageInitialized) {
-      storage.deleteChatSession(id).catch(console.error);
-    }
-  },
-
-  // Storage operations
-  initializeStore: async () => {
-    try {
-      await initStorage();
-      set({ isStorageInitialized: true });
-
-      // Load files from storage
+    // Keep existing file actions (openFile, closeFile, etc.) - these don't need project changes
+    setActiveFile: (id) => {
+      set({ activeFileId: id });
       const state = get();
-      await state.loadFilesFromStorage();
-      await state.loadChatSessionsFromStorage();
-
-      console.log('IDE store initialized with persistent storage');
-    } catch (error) {
-      console.error('Failed to initialize storage:', error);
-      // Continue with default files if storage fails
-      set({ isStorageInitialized: false });
-    }
-  },
-
-  loadFilesFromStorage: async () => {
-    try {
-      const storedFiles = await storage.getAllFiles();
-
-      if (storedFiles.length > 0) {
-        // Convert StoredFile to File format
-        const files: File[] = storedFiles.map(stored => ({
-          id: stored.id,
-          name: stored.name,
-          content: stored.content,
-          language: stored.name.endsWith('.py') ? 'python' : 'text',
-          path: `/contracts/${stored.name}`,
-          type: (stored.type as 'contract' | 'test') || 'contract',
-        }));
-
-        // Get last active file ID from preferences
-        const lastActiveFileId = await storage.getPreference('lastActiveFileId', files[0]?.id || null);
-        const validActiveFileId = files.find(f => f.id === lastActiveFileId)?.id || files[0]?.id || null;
-
-        set({
-          files,
-          activeFileId: validActiveFileId,
-          openFileIds: validActiveFileId ? [validActiveFileId] : []
-        });
-
-        console.log(`Loaded ${files.length} files from storage`);
-      } else {
-        // First time - save default files to storage
-        const state = get();
-        for (const file of state.files) {
-          await state.saveFileToStorage(file);
-        }
-        console.log('Saved default files to storage');
+      if (state.isStorageInitialized) {
+        storage.setPreference('lastActiveFileId', id).catch(console.error);
       }
-    } catch (error) {
-      console.error('Failed to load files from storage:', error);
-    }
-  },
+    },
 
-  saveFileToStorage: async (file: File) => {
-    try {
-      const storedFile: StoredFile = {
-        id: file.id,
-        name: file.name,
-        content: file.content,
+    openFile: (fileId) => {
+      set((state) => {
+        if (!state.openFileIds.includes(fileId)) {
+          return {
+            openFileIds: [...state.openFileIds, fileId],
+            activeFileId: fileId,
+          };
+        }
+        return { activeFileId: fileId };
+      });
+    },
+
+    closeFile: (fileId) => {
+      set((state) => {
+        const newOpenFileIds = state.openFileIds.filter((id) => id !== fileId);
+        let newActiveFileId = state.activeFileId;
+
+        if (state.activeFileId === fileId) {
+          const closingTabIndex = state.openFileIds.indexOf(fileId);
+          newActiveFileId =
+            newOpenFileIds[closingTabIndex] ||
+            newOpenFileIds[newOpenFileIds.length - 1] ||
+            null;
+        }
+
+        return {
+          openFileIds: newOpenFileIds,
+          activeFileId: newActiveFileId,
+        };
+      });
+    },
+
+    reorderFiles: (fromIndex, toIndex) => {
+      set((state) => {
+        const newOpenFileIds = [...state.openFileIds];
+        const [movedItem] = newOpenFileIds.splice(fromIndex, 1);
+        newOpenFileIds.splice(toIndex, 0, movedItem);
+        return { openFileIds: newOpenFileIds };
+      });
+    },
+
+    // Keep all other actions unchanged
+    addConsoleMessage: (type, message) =>
+      set((state) => ({
+        consoleMessages: [
+          ...state.consoleMessages,
+          {
+            id: `console-${++state.messageIdCounter}-${Date.now()}`,
+            type,
+            message,
+            timestamp: new Date(),
+          },
+        ],
+        messageIdCounter: state.messageIdCounter + 1,
+      })),
+
+    clearConsole: () =>
+      set(() => ({
+        consoleMessages: [],
+        messageIdCounter: 0,
+        lastExecutionLogs: null,
+      })),
+
+    setLastExecutionLogs: (logs) => set(() => ({ lastExecutionLogs: logs })),
+
+    addCompiledContract: (contract) =>
+      set((state) => ({
+        compiledContracts: [...state.compiledContracts, contract],
+      })),
+
+    addContractInstance: (fileId: string, instance: ContractInstance) =>
+      set((state) => ({
+        contractInstances: {
+          ...state.contractInstances,
+          [fileId]: instance,
+        },
+      })),
+
+    getContractInstance: (fileId: string) => {
+      const state = get();
+      return state.contractInstances[fileId] || null;
+    },
+
+    clearContractInstances: () =>
+      set(() => ({
+        contractInstances: {},
+      })),
+
+    // Helper method for AI tools to set compiled contract
+    setCompiledContract: (fileId: string, blueprintId: string) =>
+      set((state) => {
+        const file = state.files.find(f => f.id === fileId);
+        if (file) {
+          const contract: Contract = {
+            contract_id: blueprintId,
+            blueprint_id: blueprintId,
+            code: file.content,
+            methods: [],
+            created_at: new Date().toISOString(),
+            fileId: fileId, // Store which file this was compiled from
+          };
+          return {
+            compiledContracts: [...state.compiledContracts, contract],
+          };
+        }
+        return state;
+      }),
+
+    // Helper method for AI tools to set contract instance
+    setContractInstance: (fileId: string, instance: { contractId: string; blueprintId: string }) =>
+      set((state) => {
+        const file = state.files.find(f => f.id === fileId);
+        if (file) {
+          const contractInstance: ContractInstance = {
+            blueprintId: instance.blueprintId,
+            contractId: instance.contractId,
+            contractName: file.name.replace('.py', ''),
+            timestamp: new Date(),
+          };
+          return {
+            contractInstances: {
+              ...state.contractInstances,
+              [fileId]: contractInstance,
+            },
+          };
+        }
+        return state;
+      }),
+
+    setIsCompiling: (value) =>
+      set(() => ({
+        isCompiling: value,
+      })),
+
+    setIsExecuting: (value) =>
+      set(() => ({
+        isExecuting: value,
+      })),
+
+    setIsRunningTests: (value) =>
+      set(() => ({
+        isRunningTests: value,
+      })),
+
+    // Chat session actions (unchanged)
+    createChatSession: () => {
+      const sessionId = Date.now().toString();
+      const newSession: ChatSession = {
+        id: sessionId,
+        messages: [],
+        created: Date.now(),
         lastModified: Date.now(),
-        created: Date.now(), // This should ideally come from existing stored file
-        type: file.type || 'contract',
+        title: 'New Chat Session',
       };
 
-      // Check if file exists to preserve created date
-      const existingFile = await storage.getFile(file.id);
-      if (existingFile) {
-        storedFile.created = existingFile.created;
+      set((state) => ({
+        chatSessions: [...state.chatSessions, newSession],
+        activeChatSessionId: sessionId,
+      }));
+
+      const state = get();
+      if (state.isStorageInitialized) {
+        storage.saveChatSession(newSession).catch(console.error);
       }
 
-      await storage.saveFile(storedFile);
-    } catch (error) {
-      console.error('Failed to save file to storage:', error);
-    }
-  },
+      return sessionId;
+    },
 
-  deleteFileFromStorage: async (id: string) => {
-    try {
-      await storage.deleteFile(id);
-    } catch (error) {
-      console.error('Failed to delete file from storage:', error);
-    }
-  },
+    addChatMessage: (sessionId, message) => {
+      set((state) => ({
+        chatSessions: state.chatSessions.map((session) =>
+          session.id === sessionId
+            ? {
+                ...session,
+                messages: [...session.messages, message],
+                lastModified: Date.now(),
+              }
+            : session
+        ),
+      }));
 
-  loadChatSessionsFromStorage: async () => {
-    try {
-      const storedSessions = await storage.getAllChatSessions();
-
-      if (storedSessions.length > 0) {
-        // Get active session ID from preferences
-        const activeSessionId = await storage.getPreference('activeChatSessionId', null);
-        const validActiveSessionId = storedSessions.find(s => s.id === activeSessionId)?.id || null;
-
-        set({
-          chatSessions: storedSessions,
-          activeChatSessionId: validActiveSessionId,
-        });
-
-        console.log(`Loaded ${storedSessions.length} chat sessions from storage`);
-      } else {
-        console.log('No chat sessions found in storage');
+      const state = get();
+      if (state.isStorageInitialized) {
+        const updatedSession = state.chatSessions.find((s) => s.id === sessionId);
+        if (updatedSession) {
+          storage.saveChatSession(updatedSession).catch(console.error);
+        }
       }
-    } catch (error) {
-      console.error('Failed to load chat sessions from storage:', error);
-    }
-  },
-});
+    },
+
+    getChatSession: (id) => {
+      const state = get();
+      return state.chatSessions.find((session) => session.id === id) || null;
+    },
+
+    setActiveChatSession: (id) => {
+      set(() => ({
+        activeChatSessionId: id,
+      }));
+
+      const state = get();
+      if (state.isStorageInitialized) {
+        storage.setPreference('activeChatSessionId', id).catch(console.error);
+      }
+    },
+
+    deleteChatSession: (id) => {
+      set((state) => ({
+        chatSessions: state.chatSessions.filter((session) => session.id !== id),
+        activeChatSessionId: state.activeChatSessionId === id ? null : state.activeChatSessionId,
+      }));
+
+      const state = get();
+      if (state.isStorageInitialized) {
+        storage.deleteChatSession(id).catch(console.error);
+      }
+    },
+
+    // Storage operations (simplified for projects)
+    initializeStore: async () => {
+      try {
+        await initStorage();
+        set({ isStorageInitialized: true });
+
+        const state = get();
+        await state.loadFilesFromStorage();
+        await state.loadChatSessionsFromStorage();
+
+        // Trigger initial sync for active project if not already done
+        // (handles case where sample projects are used and no stored projects exist)
+        if (typeof window !== 'undefined' && state.activeProjectId) {
+          setTimeout(() => {
+            const currentState = get();
+            if (currentState.setActiveProject && !currentState.initialSyncCompleted[currentState.activeProjectId!]) {
+              currentState.setActiveProject(currentState.activeProjectId!);
+            }
+          }, 100);
+        }
+
+        console.log('IDE store initialized with persistent storage');
+      } catch (error) {
+        console.error('Failed to initialize storage:', error);
+        set({ isStorageInitialized: false });
+      }
+    },
+
+    loadFilesFromStorage: async () => {
+      try {
+        const storedProjectsJson = localStorage.getItem('hathor-projects');
+
+        if (storedProjectsJson) {
+          const storedProjects: Project[] = JSON.parse(storedProjectsJson);
+
+          if (storedProjects.length > 0) {
+            // Filter out __init__.py files from all projects (they can resurrect from storage)
+            const cleanedProjects = storedProjects.map(project => ({
+              ...project,
+              files: project.files.filter(f => f.name !== '__init__.py'),
+            }));
+
+            const activeProjectId = localStorage.getItem('hathor-active-project-id') || cleanedProjects[0].id;
+            const activeProject = cleanedProjects.find(p => p.id === activeProjectId) || cleanedProjects[0];
+
+            set({
+              projects: cleanedProjects,
+              activeProjectId: activeProject.id,
+              files: activeProject.files,
+              openFileIds: activeProject.files[0] ? [activeProject.files[0].id] : [],
+              activeFileId: activeProject.files[0]?.id || null,
+            });
+
+            // Trigger initial sync check for the loaded project
+            // Use setTimeout to ensure state is fully updated first
+            setTimeout(() => {
+              const state = get();
+              if (state.setActiveProject && activeProject.id) {
+                // Call setActiveProject to trigger sync check (it will skip if already synced)
+                state.setActiveProject(activeProject.id);
+              }
+            }, 50);
+
+            console.log(`Loaded ${cleanedProjects.length} projects from localStorage`);
+            return;
+          }
+        }
+
+        const storedSandboxUrlsJson = localStorage.getItem('hathor-sandbox-urls');
+        if (storedSandboxUrlsJson) {
+          try {
+            const storedSandboxUrls = JSON.parse(storedSandboxUrlsJson);
+            set({ sandboxUrls: storedSandboxUrls });
+          } catch (error) {
+            console.warn('Failed to parse sandbox URLs from localStorage:', error);
+          }
+        }
+
+        // Fallback: no stored projects, keep sample projects
+        console.log('No stored projects found, using sample projects');
+      } catch (error) {
+        console.error('Failed to load projects from storage:', error);
+        // Fallback to sample projects on error
+      }
+    },
+
+    saveFileToStorage: async (file: File) => {
+      try {
+        const storedFile: StoredFile = {
+          id: file.id,
+          name: file.name,
+          content: file.content,
+          lastModified: Date.now(),
+          created: Date.now(),
+          type: file.type || 'contract',
+        };
+
+        const existingFile = await storage.getFile(file.id);
+        if (existingFile) {
+          storedFile.created = existingFile.created;
+        }
+
+        await storage.saveFile(storedFile);
+      } catch (error) {
+        console.error('Failed to save file to storage:', error);
+      }
+    },
+
+    deleteFileFromStorage: async (id: string) => {
+      try {
+        await storage.deleteFile(id);
+      } catch (error) {
+        console.error('Failed to delete file from storage:', error);
+      }
+    },
+
+    loadChatSessionsFromStorage: async () => {
+      try {
+        const storedSessions = await storage.getAllChatSessions();
+
+        if (storedSessions.length > 0) {
+          const activeSessionId = await storage.getPreference('activeChatSessionId', null);
+          const validActiveSessionId =
+            storedSessions.find((s) => s.id === activeSessionId)?.id || null;
+
+          set({
+            chatSessions: storedSessions,
+            activeChatSessionId: validActiveSessionId,
+          });
+
+          console.log(`Loaded ${storedSessions.length} chat sessions from storage`);
+        } else {
+          console.log('No chat sessions found in storage');
+        }
+      } catch (error) {
+        console.error('Failed to load chat sessions from storage:', error);
+      }
+    },
+
+    setSandboxUrl: (projectId, url) => {
+      set((state) => {
+        const sandboxUrls = {
+          ...state.sandboxUrls,
+          [projectId]: url,
+        };
+
+        try {
+          localStorage.setItem('hathor-sandbox-urls', JSON.stringify(sandboxUrls));
+        } catch (error) {
+          console.warn('Failed to persist sandbox URLs:', error);
+        }
+
+        return { sandboxUrls };
+      });
+    },
+
+    getSandboxUrlValue: (projectId) => {
+      const state = get();
+      return state.sandboxUrls[projectId] || null;
+    },
+
+  };
+};
+
+// Remove all the old file initialization code below this line
 
 export const useIDEStore = create<IDEState>(createIDEStore);

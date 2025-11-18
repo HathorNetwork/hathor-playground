@@ -81,6 +81,7 @@ export class BeamService {
   private processes: Map<string, any>;
   private buildLogs: Map<string, string[]>;
   private buildInProgress: Map<string, boolean>;
+  private creationPromises: Map<string, Promise<SandboxInfo>>;
 
   constructor() {
     // Reuse existing maps if they exist (persists across hot reloads)
@@ -89,6 +90,7 @@ export class BeamService {
     this.processes = globalForBeam.beamProcesses || new Map();
     this.buildLogs = globalForBeam.beamBuildLogs || new Map();
     this.buildInProgress = globalForBeam.beamBuildInProgress || new Map();
+    this.creationPromises = new Map(); // Don't persist across reloads
 
     // Store in global
     globalForBeam.beamSandboxes = this.sandboxes;
@@ -114,25 +116,72 @@ export class BeamService {
 
   private async ensureLiveSandbox(projectId: string) {
     let instance = await this.ensureSandboxInstance(projectId);
-    try {
-      await instance.fs.statFile('/');
-      return instance;
-    } catch {
-      console.warn('Cached sandbox is dead/stale, recreating for:', projectId);
-      this.invalidateSandbox(projectId);
-      await this.createSandbox(projectId);
-      instance = this.sandboxes.get(projectId);
-      if (!instance) {
-        throw new Error('Failed to recreate sandbox for project ' + projectId);
+
+    // Health check with retry
+    const maxHealthCheckRetries = 2;
+    for (let attempt = 0; attempt < maxHealthCheckRetries; attempt++) {
+      try {
+        await instance.fs.statFile('/');
+        console.log(`[HEALTH_CHECK] Sandbox ${projectId} is alive (attempt ${attempt + 1})`);
+        return instance;
+      } catch (error: any) {
+        console.warn(`[HEALTH_CHECK] Sandbox ${projectId} health check failed (attempt ${attempt + 1}):`, error?.message);
+
+        if (attempt < maxHealthCheckRetries - 1) {
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        }
+
+        // All retries failed - recreate
+        console.warn('[HEALTH_CHECK] All retries failed, recreating sandbox for:', projectId);
+        this.invalidateSandbox(projectId);
+        await this.createSandbox(projectId);
+        instance = this.sandboxes.get(projectId);
+
+        if (!instance) {
+          throw new Error('Failed to recreate sandbox after health check failures');
+        }
+
+        return instance;
       }
-      return instance;
     }
+
+    return instance;
   }
 
   private invalidateSandbox(projectId: string) {
     this.sandboxes.delete(projectId);
     this.urls.delete(projectId);
     this.processes.delete(projectId);
+    this.buildLogs.delete(projectId);
+    this.buildInProgress.delete(projectId);
+    this.creationPromises.delete(projectId);
+  }
+
+  private async validateSandboxState(projectId: string): Promise<boolean> {
+    const hasInstance = this.sandboxes.has(projectId);
+    const hasUrl = this.urls.has(projectId);
+
+    if (hasInstance !== hasUrl) {
+      console.warn(`[STATE_INCONSISTENCY] Sandbox ${projectId}: instance=${hasInstance}, url=${hasUrl}`);
+
+      // Fix: If we have instance but no URL, try to get it
+      if (hasInstance && !hasUrl) {
+        const instance = this.sandboxes.get(projectId);
+        try {
+          const url = await instance.exposePort(DEFAULT_PORT);
+          this.urls.set(projectId, url);
+          console.log(`[STATE_FIX] Recovered URL for ${projectId}: ${url}`);
+        } catch (error: any) {
+          console.error(`[STATE_FIX] Failed to recover URL for ${projectId}:`, error?.message);
+          this.invalidateSandbox(projectId);
+          return false;
+        }
+      }
+    }
+
+    return hasInstance && hasUrl;
   }
 
   private getSandboxId(instance: any, projectId: string) {
@@ -156,29 +205,58 @@ export class BeamService {
       return false;
     }
 
-    if (typeof process.status === 'function') {
-      try {
-        const [exitCode, status] = await process.status();
-        if (typeof status === 'string') {
-          const running = status.toLowerCase() === 'running';
-          if (!running) {
-            this.processes.delete(projectId);
-          }
-          return running;
-        }
+    // Check if process status method exists
+    if (typeof process.status !== 'function') {
+      console.warn('[DEV_SERVER] Process has no status() method, assuming running');
+      return true;
+    }
 
-        if (typeof exitCode === 'number' && exitCode >= 0) {
+    try {
+      const statusResult = await Promise.race([
+        process.status(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Status check timeout')), 5000)
+        )
+      ]);
+
+      const [exitCode, status] = statusResult as any;
+
+      // Check string status first (more reliable)
+      if (typeof status === 'string') {
+        const running = status.toLowerCase() === 'running';
+        if (!running) {
+          console.log(`[DEV_SERVER] Process ${projectId} is ${status}, cleaning up`);
+          this.processes.delete(projectId);
+        }
+        return running;
+      }
+
+      // Check exit code (process ended)
+      if (typeof exitCode === 'number') {
+        if (exitCode >= 0) {
+          console.log(`[DEV_SERVER] Process ${projectId} exited with code ${exitCode}`);
           this.processes.delete(projectId);
           return false;
         }
-      } catch (error) {
-        console.warn('[DEV_SERVER] status() failed, assuming process ended:', error);
+        // Negative exit code might mean still running
+        return true;
+      }
+
+      // Unknown status format, assume running but log warning
+      console.warn('[DEV_SERVER] Unknown status format:', statusResult);
+      return true;
+    } catch (error: any) {
+      if (error.message === 'Status check timeout') {
+        console.warn('[DEV_SERVER] Status check timeout for:', projectId);
+        // Timeout might mean process is stuck or dead
         this.processes.delete(projectId);
         return false;
       }
-    }
 
-    return true;
+      console.warn('[DEV_SERVER] status() failed, assuming process ended:', error?.message);
+      this.processes.delete(projectId);
+      return false;
+    }
   }
 
   private shouldSkipPath(sandboxPath: string) {
@@ -434,17 +512,63 @@ export class BeamService {
         return {
           url: existingUrl,
           sandbox_id: existingInstance.id || 'sandbox-' + projectId,
-          project_id: projectId
+          project_id: projectId,
+          dev_server_running: this.processes.has(projectId),
         };
       }
     }
 
+    // Check if creation is already in progress
+    const existingCreation = this.creationPromises.get(projectId);
+    if (existingCreation) {
+      console.log('[CREATE_SANDBOX] Creation already in progress, waiting...', projectId);
+      return existingCreation;
+    }
+
+    // Start new creation
+    const creationPromise = this._createSandboxInternal(projectId);
+    this.creationPromises.set(projectId, creationPromise);
+
+    try {
+      const result = await creationPromise;
+      return result;
+    } finally {
+      // Clean up promise after completion
+      this.creationPromises.delete(projectId);
+    }
+  }
+
+  private async _createSandboxInternal(projectId: string): Promise<SandboxInfo> {
     console.log('Creating sandbox for project:', projectId);
 
-    // Initialize build logs
+    // Clear any old build logs first
+    this.buildLogs.delete(projectId);
+    this.buildInProgress.delete(projectId);
+
+    // Initialize fresh build logs
     this.buildLogs.set(projectId, ['Starting sandbox creation...', 'Building Docker image...']);
     this.buildInProgress.set(projectId, true);
 
+    try {
+      // Add timeout wrapper (10 minutes max)
+      const timeoutMs = 10 * 60 * 1000;
+      const result = await Promise.race([
+        this._doCreateSandbox(projectId),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Sandbox creation timeout (10 minutes)')), timeoutMs)
+        )
+      ]);
+
+      return result;
+    } catch (error: any) {
+      this.appendBuildLog(projectId, `❌ Sandbox creation failed: ${error?.message || String(error)}`);
+      throw error;
+    } finally {
+      this.buildInProgress.set(projectId, false);
+    }
+  }
+
+  private async _doCreateSandbox(projectId: string): Promise<SandboxInfo> {
     try {
       const image = await baseImagePromise;
       const sandbox = new Sandbox({
@@ -477,17 +601,31 @@ export class BeamService {
         project_id: projectId,
         dev_server_running: this.processes.has(projectId),
       };
-    } finally {
-      this.buildInProgress.set(projectId, false);
+    } catch (error: any) {
+      this.appendBuildLog(projectId, `❌ Error during sandbox creation: ${error?.message || String(error)}`);
+      throw error;
     }
   }
 
   async getSandbox(projectId: string): Promise<any | null> {
+    // Validate input
+    if (!projectId || typeof projectId !== 'string' || projectId.trim() === '') {
+      console.error('[getSandbox] Invalid projectId:', projectId);
+      return null;
+    }
+
     console.log('[getSandbox] Looking for projectId:', projectId);
     console.log('[getSandbox] Available sandboxes:', Array.from(this.sandboxes.keys()));
     const instance = this.sandboxes.get(projectId);
     if (!instance) {
       console.log('[getSandbox] NOT FOUND for:', projectId);
+      return null;
+    }
+
+    // Validate state consistency
+    const isValid = await this.validateSandboxState(projectId);
+    if (!isValid) {
+      console.warn('[getSandbox] Invalid state detected, returning null');
       return null;
     }
 
@@ -497,11 +635,33 @@ export class BeamService {
     return instance;
   }
 
+  private async refreshSandboxUrl(projectId: string): Promise<string | null> {
+    const instance = this.sandboxes.get(projectId);
+    if (!instance) return null;
+
+    try {
+      // Try to get fresh URL
+      const freshUrl = await instance.exposePort(DEFAULT_PORT);
+      const cachedUrl = this.urls.get(projectId);
+
+      if (freshUrl !== cachedUrl) {
+        console.log(`[URL_REFRESH] URL changed for ${projectId}: ${cachedUrl} -> ${freshUrl}`);
+        this.urls.set(projectId, freshUrl);
+      }
+
+      return freshUrl;
+    } catch (error: any) {
+      console.warn(`[URL_REFRESH] Failed to refresh URL for ${projectId}:`, error?.message);
+      return this.urls.get(projectId) || null;
+    }
+  }
+
   async getSandboxInfo(projectId: string): Promise<SandboxInfo | null> {
     const instance = await this.getSandbox(projectId);
     if (!instance) return null;
 
-    const url = this.urls.get(projectId);
+    // Refresh URL to ensure it's current
+    const url = await this.refreshSandboxUrl(projectId);
     if (!url) return null;
 
     const running = await this.isDevServerRunning(projectId);
@@ -639,23 +799,42 @@ export class BeamService {
   }
 
   async terminateSandbox(projectId: string): Promise<{ status: string }> {
+    console.log('[TERMINATE] Starting sandbox termination for:', projectId);
     const instance = this.sandboxes.get(projectId);
+
     if (!instance) {
+      console.log('[TERMINATE] Sandbox not found, cleaning up state anyway');
+      this.invalidateSandbox(projectId);
       return { status: 'not_found' };
     }
 
     try {
+      // 1. Stop dev server first
+      console.log('[TERMINATE] Stopping dev server...');
+      await this.stopDevServer(projectId).catch(err =>
+        console.warn('[TERMINATE] Failed to stop dev server:', err)
+      );
+
+      // 2. Terminate sandbox instance
+      console.log('[TERMINATE] Terminating sandbox instance...');
       if (typeof instance.terminate === 'function') {
         await instance.terminate();
-      } else {
-        // Fallback: stop dev server and invalidate maps
-        await this.stopDevServer(projectId);
       }
-    } finally {
-      this.invalidateSandbox(projectId);
-    }
 
-    return { status: 'terminated' };
+      // 3. Clean up all state
+      console.log('[TERMINATE] Cleaning up state maps...');
+      this.invalidateSandbox(projectId);
+
+      console.log('[TERMINATE] Sandbox terminated successfully:', projectId);
+      return { status: 'terminated' };
+    } catch (error: any) {
+      console.error('[TERMINATE] Error during termination:', error);
+
+      // Still clean up state even on error
+      this.invalidateSandbox(projectId);
+
+      return { status: 'terminated_with_errors', error: error?.message };
+    }
   }
 
   async runHeavyTask(command: string, cwd: string = DEFAULT_CODE_PATH): Promise<{ output: string; url?: string }> {

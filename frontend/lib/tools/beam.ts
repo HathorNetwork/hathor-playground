@@ -1,6 +1,5 @@
 import { beamClient } from '../beam-client';
 import { useIDEStore } from '@/store/ide-store';
-import { guardContractMetadata } from './contract-metadata';
 import type { File } from '@/store/ide-store';
 
 import { ToolResult } from './types';
@@ -350,12 +349,7 @@ async function deployDApp(): Promise<ToolResult> {
         };
       }
 
-    const metadataGuard = guardContractMetadata('deploy the dApp or restart the sandbox wallet');
-    if (metadataGuard) {
-      addConsoleMessage?.('warning', metadataGuard.message);
-      return metadataGuard;
-    }
-
+    // Removed metadata guard - dApp deployment should work regardless of contract metadata
     addConsoleMessage?.('info', '🚀 Deploying dApp to BEAM sandbox...');
 
     let buildLogStream: EventSource | null = null;
@@ -638,12 +632,7 @@ async function restartDevServer(): Promise<ToolResult> {
         };
       }
 
-    const metadataGuard = guardContractMetadata('start or restart the dev server');
-    if (metadataGuard) {
-      addConsoleMessage?.('warning', metadataGuard.message);
-      return metadataGuard;
-    }
-
+    // Removed metadata guard - dev server should restart regardless of contract metadata
     addConsoleMessage?.('info', '🔄 Syncing files before restart...');
 
     try {

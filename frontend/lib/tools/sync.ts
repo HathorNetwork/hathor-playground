@@ -7,6 +7,12 @@ import { ToolResult } from './types';
 
 type SyncDirection = 'ide-to-sandbox' | 'sandbox-to-ide' | 'bidirectional';
 
+const MAX_SANDBOX_WAIT_MS = 60000; // 1 minute
+const SANDBOX_POLL_INTERVAL_MS = 2000; // 2 seconds
+
+// Prevent concurrent wait operations on the same sandbox
+const sandboxReadyPromises = new Map<string, Promise<boolean>>();
+
 interface SandboxEntry {
   path: string;
   encoding: 'base64';
@@ -61,6 +67,69 @@ interface SyncOptions {
   forceFullUpload?: boolean;
 }
 
+async function _doWaitForSandboxReady(projectId: string): Promise<boolean> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < MAX_SANDBOX_WAIT_MS) {
+    try {
+      // Try to fetch sandbox info
+      const response = await fetch(`/api/beam/sandbox/${projectId}`);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.url) {
+          console.log('[SYNC] Sandbox ready:', projectId);
+          return true;
+        }
+      }
+
+      if (response.status === 404) {
+        console.log('[SYNC] Sandbox not found, creating...');
+        // Trigger sandbox creation (only once per concurrent batch)
+        const createResponse = await fetch(`/api/beam/sandbox/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: projectId }),
+        });
+
+        if (!createResponse.ok) {
+          console.error('[SYNC] Failed to create sandbox');
+          return false;
+        }
+      }
+
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, SANDBOX_POLL_INTERVAL_MS));
+    } catch (error: any) {
+      console.warn('[SYNC] Error checking sandbox:', error?.message);
+      // Continue retrying
+    }
+  }
+
+  console.error('[SYNC] Timeout waiting for sandbox to be ready');
+  return false;
+}
+
+async function waitForSandboxReady(projectId: string): Promise<boolean> {
+  // Check if another sync is already waiting for this sandbox
+  const existing = sandboxReadyPromises.get(projectId);
+  if (existing) {
+    console.log('[SYNC] Reusing existing wait promise for:', projectId);
+    return existing;
+  }
+
+  // Start new wait operation
+  const promise = _doWaitForSandboxReady(projectId);
+  sandboxReadyPromises.set(projectId, promise);
+
+  try {
+    return await promise;
+  } finally {
+    // Clean up after completion
+    sandboxReadyPromises.delete(projectId);
+  }
+}
+
 export async function syncDApp(
   direction: SyncDirection = 'bidirectional',
   projectId?: string,
@@ -75,6 +144,18 @@ export async function syncDApp(
         success: false,
         message: 'No active project',
         error: 'Select or create a project first',
+      };
+    }
+
+    // Wait for sandbox to be ready before syncing
+    addConsoleMessage?.('info', '⏳ Checking sandbox status...');
+    const sandboxReady = await waitForSandboxReady(activeProjectId);
+
+    if (!sandboxReady) {
+      return {
+        success: false,
+        message: '❌ Sandbox not ready',
+        error: 'Sandbox failed to start or timeout waiting for sandbox',
       };
     }
 

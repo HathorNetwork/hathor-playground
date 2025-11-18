@@ -1483,6 +1483,165 @@ The sandbox now boots with the official `create-hathor-dapp` template already in
 
 ---
 
+## 🚨 Next.js Import Strategy - CRITICAL ANTI-PATTERNS
+
+### Rule 1: PREFER RELATIVE IMPORTS - Avoid `@/` Path Aliases
+
+**🚨 MOST IMPORTANT: Use relative imports by default, NOT `@/` path aliases! 🚨**
+
+Next.js path aliases (`@/`) are **fragile** and cause frequent build errors. **Always use relative imports** unless the file already uses `@/` imports successfully.
+
+#### ✅ CORRECT - Use Relative Imports:
+```typescript
+import { Component } from '../components/Component'
+import { util } from '../../lib/utils'
+import { NANO_CONTRACTS } from '../lib/nanocontracts'
+```
+
+#### ❌ WRONG - Avoid Path Aliases:
+```typescript
+import { Component } from '@/components/Component'  // ❌ Can break!
+import { util } from '@/lib/utils'  // ❌ Can break!
+```
+
+**Why relative imports are better:**
+- ✅ **More reliable**: No tsconfig.json path resolution issues
+- ✅ **Explicit**: Clear file relationships
+- ✅ **Always work**: No build config required
+- ✅ **Easier to debug**: Path is visible, not hidden behind alias
+
+### Rule 2: VERIFY Before Assuming Paths
+
+**NEVER assume directory structure!** Always verify paths before creating files.
+
+#### Before creating ANY dApp file:
+1. **Check tsconfig.json first**: `read_file("/dapp/tsconfig.json")` or `read_file("/dapp/hathor-dapp/tsconfig.json")`
+2. **Verify directory structure**: `list_files("/dapp")` to see actual layout
+3. **Check if `src/` exists**: Most Next.js projects **do NOT** have a `src/` directory
+
+#### Common path mistakes:
+❌ **WRONG**: Assuming `/dapp/src/lib/` exists
+❌ **WRONG**: Assuming `@/` points to `/dapp/src/`
+❌ **WRONG**: Creating files in non-existent directories
+
+✅ **CORRECT**: Check `list_files("/dapp")` first
+✅ **CORRECT**: Read `tsconfig.json` to verify path aliases
+✅ **CORRECT**: Verify directory exists before writing files
+
+### Rule 3: Fixing "Module not found: Can't resolve '@/...'" Errors
+
+When you encounter import errors, follow this exact process:
+
+#### Step 1: Switch to Relative Imports (FIRST CHOICE)
+```typescript
+// Change this:
+import { NANO_CONTRACTS } from '@/lib/nanocontacts'
+
+// To this:
+import { NANO_CONTRACTS } from '../lib/nanocontacts'
+```
+
+#### Step 2: Only if Step 1 fails, verify the file exists:
+```bash
+1. list_files("/dapp/lib")  # Check if lib directory exists
+2. list_files("/dapp")      # Check overall structure
+```
+
+#### Step 3: If file doesn't exist, create it in the correct location:
+```typescript
+// Verify first:
+list_files("/dapp")  // See if /dapp/lib/ exists
+
+// Then create:
+write_file("/dapp/lib/nanocontracts.ts", content)  // NOT /dapp/src/lib/!
+```
+
+### Rule 4: NEVER Create `src/` Directory
+
+Most Next.js projects **do NOT** use a `src/` directory. Files go in the project root:
+
+```
+/dapp/
+├── app/              # NOT /dapp/src/app/
+├── components/       # NOT /dapp/src/components/
+├── lib/             # NOT /dapp/src/lib/
+└── tsconfig.json
+```
+
+#### ❌ WRONG - Creating src/ directory:
+```bash
+write_file("/dapp/src/lib/nanocontracts.ts", ...)  # ❌ Creates wrong directory!
+```
+
+#### ✅ CORRECT - Files in project root:
+```bash
+# Check structure first:
+list_files("/dapp")
+
+# Then create in correct location:
+write_file("/dapp/lib/nanocontracts.ts", ...)  # ✅ Correct!
+```
+
+### Rule 5: Tool Call Error Handling - NEVER RETRY WITHOUT CHANGING PARAMETERS
+
+**🚨 CRITICAL: If a tool call fails, NEVER call it again with the same parameters! 🚨**
+
+#### ❌ WRONG - Infinite Loop Pattern:
+```
+1. write_file({}) → "Path is required and cannot be undefined"
+2. write_file({}) → "Path is required and cannot be undefined"  # ❌ STOP!
+3. write_file({}) → "Path is required and cannot be undefined"  # ❌ WHY ARE YOU RETRYING?
+```
+
+#### ✅ CORRECT - Fix the Error:
+```
+1. write_file({}) → "Path is required and cannot be undefined"
+2. STOP! Read the error message
+3. Fix the call: write_file({ path: "/dapp/lib/file.ts", content: "..." })
+```
+
+**If you see "BLOCKED: This exact tool call has failed 2 times":**
+- 🛑 **STOP IMMEDIATELY** - Do NOT retry
+- 🔍 **Diagnose** - Use different tools to investigate
+- 💡 **Try different approach** - Use alternative tools or strategies
+- 🆘 **Ask user** - If truly stuck, explain the issue and ask for help
+
+### Rule 6: One Dev Server Restart is Enough
+
+**NEVER restart the dev server multiple times in a row!**
+
+#### ❌ WRONG - Multiple Restarts:
+```
+1. restart_dev_server()
+2. restart_dev_server()  # ❌ Why?
+3. restart_dev_server()  # ❌ This won't help!
+```
+
+#### ✅ CORRECT - Restart Once After All Changes:
+```
+1. write_file("/dapp/lib/nanocontracts.ts", ...)
+2. write_file("/dapp/components/Counter.tsx", ...)
+3. sync_dapp({ direction: "ide-to-sandbox" })
+4. restart_dev_server()  # ✅ Once is enough!
+```
+
+### Summary: Next.js Golden Rules
+
+1. **Use relative imports** - NOT `@/` path aliases
+2. **Verify paths first** - Check `tsconfig.json` and `list_files("/dapp")`
+3. **No `src/` directory** - Files go in `/dapp/`, NOT `/dapp/src/`
+4. **Fix errors, don't retry** - Read error messages and fix the root cause
+5. **One restart is enough** - Don't restart dev server multiple times
+6. **Check before creating** - Use `list_files()` to verify directory structure
+
+**When in doubt:**
+- Use relative imports
+- Check file structure with `list_files("/dapp")`
+- Read `tsconfig.json` to verify path configuration
+- Ask user if unclear about directory structure
+
+---
+
 ## 🧭 dApp Navigation & Component Integration
 
 ### Understanding Hathor dApp Structure
