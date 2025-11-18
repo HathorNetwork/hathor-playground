@@ -105,7 +105,7 @@ def extract_modified_code_from_response(
             if ("from hathor" in modified_code or
                     "import" in modified_code or
                     "class" in modified_code or
-                    "__blueprint__" in modified_code):
+                    "@export" in modified_code):
                 logger.warning(
                     "Extracted code from regular python block - "
                     "AI should use <modified_code> XML tags")
@@ -188,14 +188,43 @@ def initialize(self, ctx: Context):
 ✅ CORRECT: `def initialize(self, ctx: Context, ...):`
 
 ### Rule 3: Always Export Blueprint
-❌ WRONG: Missing export at end of file
-✅ CORRECT: `__blueprint__ = YourClassName`
+❌ WRONG: Missing @export decorator
+✅ CORRECT: Use `@export` decorator on your class
 
 ### Rule 4: Decorators Are Required
 ❌ WRONG: Method without @public or @view
 ✅ CORRECT:
 - `@public` for state-changing methods (requires `ctx: Context`)
 - `@view` for read-only methods (no `ctx` parameter)
+
+### Rule 5: No Default Values in @public/@view Methods
+❌ WRONG:
+```python
+@public
+def initialize(self, ctx: Context, initial_value: int = 0) -> None:
+    # Default values not allowed in public methods!
+
+@view
+def get_balance(self, address: Address = None) -> int:
+    # Default values not allowed in view methods!
+```
+
+✅ CORRECT:
+```python
+@public
+def initialize(self, ctx: Context, initial_value: int) -> None:
+    # No default values - caller must provide all arguments
+
+@view
+def get_balance(self, address: Address) -> int:
+    # No default values - all parameters are required
+
+# Internal methods CAN have defaults:
+def _internal_helper(self, value: int = 0) -> int:
+    return value * 2
+```
+
+**Why**: Default values can cause ABI compatibility issues and make contract calls ambiguous.
 
 ---
 
@@ -204,8 +233,9 @@ def initialize(self, ctx: Context):
 ### Blueprint Structure
 
 ```python
-from hathor import Blueprint, public, view, Context
+from hathor import Blueprint, public, view, Context, export
 
+@export
 class MyBlueprint(Blueprint):
     # 1. FIELD DECLARATIONS (type annotations only)
     counter: int
@@ -228,9 +258,6 @@ class MyBlueprint(Blueprint):
     @view
     def get_count(self) -> int:
         return self.counter
-
-# 5. EXPORT (required!)
-__blueprint__ = MyBlueprint
 ```
 
 
@@ -769,10 +796,11 @@ seed = rng.seed  # bytes (32 bytes)
 
 ```python
 from hathor import (
-    Blueprint, public, view, Context,
+    Blueprint, public, view, Context, export,
     NCFail, Amount, CallerId
 )
 
+@export
 class HathorDice(Blueprint):
     \\\"\\\"\\\"Production dice game using self.syscall.rng for on-chain randomness.\\\"\\\"\\\"
 
@@ -842,7 +870,6 @@ class HathorDice(Blueprint):
         denominator = 10_000 * threshold
         return numerator // denominator
 
-__blueprint__ = HathorDice
 ```
 
 **Key Points from This Example**:
@@ -930,7 +957,7 @@ class UnbiasableLottery(Blueprint):
 
 ```python
 from hathor import (
-    Blueprint, public, view, Context,
+    Blueprint, public, view, Context, export,
     Address, TokenUid, NCDepositAction, NCWithdrawalAction
 )
 from hathor import make_nc_type_for_arg_type as make_nc_type
@@ -1012,8 +1039,9 @@ class MyBlueprintTest(BlueprintTestCase):
 ### Example 1: Simple Counter Blueprint
 
 ```python
-from hathor import Blueprint, public, view, Context
+from hathor import Blueprint, public, view, Context, export
 
+@export
 class Counter(Blueprint):
     count: int
 
@@ -1032,8 +1060,6 @@ class Counter(Blueprint):
     @view
     def get_count(self) -> int:
         return self.count
-
-__blueprint__ = Counter
 ```
 
 **Test File** (`/tests/test_counter.py`):
@@ -1072,7 +1098,7 @@ class CounterTest(BlueprintTestCase):
 ```python
 from typing import Optional
 from hathor import (
-    Blueprint, public, view, Context,
+    Blueprint, public, view, Context, export,
     Address, TokenUid, NCDepositAction, NCWithdrawalAction,
     SignedData, TxOutputScript, NCFail
 )
@@ -1086,6 +1112,7 @@ class TooLate(NCFail):
 class ResultNotAvailable(NCFail):
     pass
 
+@export
 class Bet(Blueprint):
     # Total bets per result
     bets_total: dict[str, int]
@@ -1211,7 +1238,6 @@ class Bet(Blueprint):
         address_bet = self.bets_address.get((self.final_result, address), 0)
         return address_bet * self.total // result_total
 
-__blueprint__ = Bet
 ```
 
 ---
@@ -1282,20 +1308,45 @@ def increment(self, ctx: Context) -> None:
     self.count += 1  # State change in @public
 ```
 
-### Anti-Pattern 5: Missing Blueprint Export
+### Anti-Pattern 5: Default Values in Public/View Methods
+```python
+❌ WRONG:
+@public
+def transfer(self, ctx: Context, to: Address, amount: int = 100):
+    # Default values not allowed!
+
+@view
+def get_info(self, detailed: bool = False) -> str:
+    # Default values not allowed!
+
+✅ CORRECT:
+@public
+def transfer(self, ctx: Context, to: Address, amount: int) -> None:
+    # Caller must provide all arguments
+
+@view
+def get_info(self, detailed: bool) -> str:
+    # All parameters required
+
+# Internal methods can have defaults:
+def _calculate(self, base: int, multiplier: int = 2) -> int:
+    return base * multiplier
+```
+
+### Anti-Pattern 6: Missing Blueprint Export
 ```python
 ❌ WRONG:
 class MyBlueprint(Blueprint):
     # ... methods ...
-# Missing export!
+# Missing @export decorator!
 
 ✅ CORRECT:
+from hathor import export
+
+@export
 class MyBlueprint(Blueprint):
     # ... methods ...
-
-__blueprint__ = MyBlueprint
 ```
-
 """
 
 
@@ -1323,7 +1374,7 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
                     "• Always use @public for state-changing methods\n"
                     "• Use @view for read-only methods\n"
                     "• Include type hints for all variables\n"
-                    "• Export your class as __blueprint__\n\n"
+                    "• Use @export decorator on your class\n\n"
                     f"Error: {str(e)}"
                 ),
                 suggestions=[
@@ -1474,9 +1525,9 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
             if "@view" not in request.current_file_content:
                 suggestions.append(
                     "Add @view methods for read-only operations")
-            if "__blueprint__" not in request.current_file_content:
+            if "@export" not in request.current_file_content:
                 suggestions.append(
-                    "Don't forget to export your class as __blueprint__")
+                    "Don't forget to add @export decorator to your class")
 
         return ChatResponse(
             success=True,
@@ -1499,7 +1550,7 @@ async def chat_with_assistant(request: ChatRequest, http_request: Request):
                 "• Make sure your contract inherits from Blueprint\n"
                 "• Use proper decorators (@public/@view)\n"
                 "• Include the initialize method\n"
-                "• Export as __blueprint__ at the end"
+                "• Use @export decorator on your class"
             ),
             suggestions=[
                 "Check Hathor nano contracts documentation",
