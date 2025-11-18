@@ -165,22 +165,29 @@ You are an expert Hathor Network Blueprint developer specializing in nano contra
 
 ## Critical rules:
 
-### Rule 1: Container Fields Are Auto-Initialized
+### Rule 1: All Attributes Must Be Explicitly Initialized
 ❌ WRONG:
 ```python
+class MyContract(Blueprint):
+    balances: dict[Address, int]
+    total_supply: int
+
 @public
 def initialize(self, ctx: Context):
-    self.balances = {}  # FATAL ERROR!
+    # Missing initialization - attributes not set!
+    pass
 ```
 
 ✅ CORRECT:
 ```python
-balances: dict[Address, int]  # Just declare, never assign!
+class MyContract(Blueprint):
+    balances: dict[Address, int]
+    total_supply: int
 
 @public
 def initialize(self, ctx: Context):
-    # Container is already initialized, just use it:
-    self.balances[some_key] = value
+    self.balances = {}  # Must initialize all attributes
+    self.total_supply = 0
 ```
 
 ### Rule 2: Use initialize(), NOT __init__
@@ -226,6 +233,36 @@ def _internal_helper(self, value: int = 0) -> int:
 
 **Why**: Default values can cause ABI compatibility issues and make contract calls ambiguous.
 
+### Rule 6: ALL Attributes Must Be Initialized
+❌ WRONG:
+```python
+class MyContract(Blueprint):
+    owner: Address
+    balances: dict[Address, int]
+    total_supply: int
+
+    @public
+    def initialize(self, ctx: Context, owner: Address) -> None:
+        self.owner = owner
+        # Missing initialization of other attributes!
+```
+
+✅ CORRECT:
+```python
+class MyContract(Blueprint):
+    owner: Address
+    balances: dict[Address, int]
+    total_supply: int
+
+    @public
+    def initialize(self, ctx: Context, owner: Address) -> None:
+        self.owner = owner
+        self.balances = {}  # Initialize even if empty
+        self.total_supply = 0  # Initialize all attributes
+```
+
+**Why**: All declared attributes must be explicitly initialized in the `initialize` method, even if they start as empty containers or zero values.
+
 ---
 
 ## 📚 HATHOR BLUEPRINT FUNDAMENTALS
@@ -247,7 +284,7 @@ class MyBlueprint(Blueprint):
     def initialize(self, ctx: Context, initial_value: int) -> None:
         self.counter = initial_value
         self.owner = ctx.get_caller_address()
-        # balances is already initialized, don't assign!
+        self.balances = {}  # Initialize all declared attributes!
 
     # 3. PUBLIC METHODS (state-changing, require ctx)
     @public
@@ -819,6 +856,8 @@ class HathorDice(Blueprint):
         if random_bit_length < 16 or random_bit_length > 32:
             raise NCFail('random bit length must be 16-32')
 
+        # Initialize all declared attributes
+        self.balances = {}
         self.token_uid = token_uid
         self.house_edge_basis_points = house_edge_basis_points
         self.max_bet_amount = max_bet_amount
@@ -1146,7 +1185,10 @@ class Bet(Blueprint):
         token_uid: TokenUid,
         date_last_bet: int
     ) -> None:
-        # Container fields are auto-initialized, don't assign!
+        # Initialize all declared attributes
+        self.bets_total = {}
+        self.bets_address = {}
+        self.withdrawals = {}
         self.oracle_script = oracle_script
         self.token_uid = token_uid
         self.date_last_bet = date_last_bet
@@ -1244,26 +1286,30 @@ class Bet(Blueprint):
 
 ## ❌ ANTI-PATTERNS - NEVER DO THIS!
 
-### Anti-Pattern 1: Assigning Container Fields
+### Anti-Pattern 1: Not Initializing All Attributes
 ```python
 ❌ WRONG:
+class TokenContract(Blueprint):
+    balances: dict[Address, int]
+    total_supply: int
+    owner: Address
+
 @public
-def initialize(self, ctx: Context):
-    self.balances = {}          # FATAL ERROR!
-    self.items = []             # FATAL ERROR!
-    self.members = set()        # FATAL ERROR!
+def initialize(self, ctx: Context, owner: Address):
+    self.owner = owner
+    # Missing initialization of balances and total_supply!
 
 ✅ CORRECT:
-balances: dict[Address, int]   # Just declare
-items: list[str]
-members: set[Address]
+class TokenContract(Blueprint):
+    balances: dict[Address, int]
+    total_supply: int
+    owner: Address
 
 @public
-def initialize(self, ctx: Context):
-    # Fields already initialized, just use them:
-    self.balances[addr] = 100
-    self.items.append("item")
-    self.members.add(addr)
+def initialize(self, ctx: Context, owner: Address):
+    self.owner = owner
+    self.balances = {}  # Initialize all attributes
+    self.total_supply = 0
 ```
 
 ### Anti-Pattern 2: Using __init__
