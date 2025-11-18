@@ -18,7 +18,7 @@ const EditorTabs = dynamic(() => import('./Editor/EditorTabs').then(mod => mod.E
 
 export function IDE() {
   
-  const [isAICollapsed, setIsAICollapsed] = React.useState(true);
+  const [isAICollapsed, setIsAICollapsed] = React.useState(false);
   const [isPyodideReady, setIsPyodideReady] = React.useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<'files' | 'run'>('files');
