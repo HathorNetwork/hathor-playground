@@ -434,10 +434,10 @@ class MyBlueprint(Blueprint):
 - `TxOutputScript`: Script for validation
 - `SignedData[T]`: Cryptographically signed data
 
-#### Container Types (Auto-Initialized!)
-- `dict[K, V]`: Key-value mapping
-- `set[T]`: Unique values
-- `list[T]`: Ordered values (use tuple for fields!)
+#### Container Types (Special Hathor Implementations!)
+- `dict[K, V]`: Key-value mapping (becomes **DictContainer**)
+- `set[T]`: Unique values (becomes **SetContainer**)
+- `list[T]`: Ordered values (becomes **DequeContainer**)
 - `tuple[...]`: Immutable sequence
 - `Optional[T]`: Value or None
 
@@ -445,6 +445,366 @@ class MyBlueprint(Blueprint):
 - `tuple[A, B, C]`: Fixed-size tuple
 - `NamedTuple`: Named tuple fields
 - Dataclasses (with @dataclass)
+
+---
+
+## 🏗️ HATHOR CONTAINER TYPES - CRITICAL UNDERSTANDING
+
+### Important: dict ≠ dict, list ≠ list, set ≠ set
+
+**In Hathor Blueprints, when you declare `dict`, `list`, or `set` types, they are NOT standard Python containers. They are special Hathor container types that persist to blockchain storage:**
+
+- `dict[K, V]` → **DictContainer** (not Python dict)
+- `list[T]` → **DequeContainer** (not Python list)  
+- `set[T]` → **SetContainer** (not Python set)
+
+### Key Differences from Standard Python
+
+#### DictContainer vs dict
+```python
+# Declaration (looks like dict, but it's DictContainer)
+class MyContract(Blueprint):
+    balances: dict[Address, int]  # This is DictContainer!
+    
+    @public
+    def initialize(self, ctx: Context) -> None:
+        self.balances = {}  # Initialize as empty DictContainer
+
+# Usage differences:
+@public
+def example(self, ctx: Context) -> None:
+    # ✅ WORKS: Basic dict operations
+    self.balances[address] = 100
+    balance = self.balances.get(address, 0)
+    del self.balances[address]
+    
+    # ✅ WORKS: membership
+    if address in self.balances:
+        pass
+    
+    # ❌ NOT IMPLEMENTED: Some dict methods
+    # self.balances.keys()      # May not work
+    # self.balances.values()    # May not work  
+    # self.balances.items()     # May not work
+    # self.balances.copy()      # Not implemented
+
+    # ❌ NOT IMPLEMENTED: Iteration does not work!!
+    # for address in self.balances: # <-- WILL NOT WORK
+    #    pass
+```
+
+#### DequeContainer vs list
+```python
+# Declaration (looks like list, but it's DequeContainer)
+class MyContract(Blueprint):
+    items: list[str]  # This is DequeContainer!
+    
+    @public
+    def initialize(self, ctx: Context) -> None:
+        self.items = []  # Initialize as empty DequeContainer
+
+# Usage differences:
+@public
+def example(self, ctx: Context) -> None:
+    # ✅ WORKS: Basic sequence operations
+    self.items.append("item")
+    self.items.extend(["a", "b", "c"])
+    item = self.items[0]        # Access by index
+    self.items[0] = "new_item"  # Set by index
+    length = len(self.items)
+    
+    # ✅ WORKS: Deque-specific operations  
+    self.items.appendleft("first")
+    self.items.extendleft(["x", "y"])
+    first = self.items.popleft()
+    last = self.items.pop()
+    self.items.reverse()
+    
+    # ✅ WORKS: Iteration
+    for item in self.items:
+        pass
+    
+    # ❌ NOT IMPLEMENTED: Some list methods
+    # self.items.insert(1, "item")  # Not implemented
+    # self.items.remove("item")     # Not implemented
+    # self.items.sort()             # Not implemented
+    # self.items.index("item")      # Not implemented
+```
+
+#### SetContainer vs set
+```python
+# Declaration (looks like set, but it's SetContainer)
+class MyContract(Blueprint):
+    members: set[Address]  # This is SetContainer!
+    members2: set[Address]
+    
+    @public
+    def initialize(self, ctx: Context) -> None:
+        self.members = set()  # Initialize as empty SetContainer
+
+# Usage differences:
+@public
+def example(self, ctx: Context) -> None:
+    # ✅ WORKS: Basic set operations
+    self.members.add(address)
+    self.members.discard(address) 
+    self.members.remove(address)  # Raises KeyError if not found
+    self.members.update([addr1, addr2])
+    
+    # ✅ WORKS: Membership and size
+    if address in self.members:
+        pass
+    size = len(self.members)
+    
+    # ✅ WORKS: Some set operations
+    other_set: set = set()
+    is_disjoint = self.members.isdisjoint(other_set)
+    is_superset = self.members.issuperset(other_set)
+    intersection = self.members.intersection(other_set)
+
+    # ❌ NOT IMPLEMENTED: set operations with other containers
+    is_disjoint = self.members.isdisjoint(self.members2)
+    is_superset = self.members.issuperset(self.members2)
+    intersection = self.members.intersection(self.members2)
+    
+    # ❌ NOT IMPLEMENTED: Many set methods
+    # self.members.copy()                    # Not implemented
+    # self.members.union(other)              # Not implemented
+    # self.members.difference(other)         # Not implemented
+    # self.members.symmetric_difference()    # Not implemented
+```
+
+### Why These Special Containers Exist
+
+1. **Blockchain Storage**: Standard Python containers can't persist to blockchain storage
+2. **Merkle Patricia Trie**: Data is stored in a trie structure for efficient blockchain operations
+
+### Container Initialization Patterns
+
+```python
+class TokenContract(Blueprint):
+    balances: dict[Address, int]           # DictContainer
+    transaction_history: list[str]         # DequeContainer  
+    authorized_minters: set[Address]       # SetContainer
+    
+    @public
+    def initialize(self, ctx: Context, owner: Address) -> None:
+        # ✅ CORRECT: Initialize all containers
+        self.balances = {}                 # Empty DictContainer
+        self.transaction_history = []      # Empty DequeContainer
+        self.authorized_minters = set()    # Empty SetContainer
+
+        # ✅ ALSO CORRECT: initialize containers with values
+        # self.balances = { owner: 1000 }
+        # self.transaction_history = [f"Contract created by {owner.hex()}"]
+        # self.authorized_minters = {owner}
+```
+---
+
+## ⚠️ WHAT WORKS vs WHAT FAILS - SPECIFIC EXAMPLES
+
+### DictContainer: What Works ✅ vs What Fails ❌
+
+```python
+@export
+class ExampleContract(Blueprint):
+    balances: dict[Address, int]  # This is DictContainer!
+    
+    @public
+    def dict_operations(self, ctx: Context) -> None:
+        address = ctx.get_caller_address()
+        
+        # ✅ THESE WORK - Basic dict operations
+        self.balances[address] = 100              # __setitem__
+        balance = self.balances[address]          # __getitem__  
+        balance = self.balances.get(address, 0)   # get() with default
+        exists = address in self.balances         # __contains__
+        del self.balances[address]                # __delitem__
+        length = len(self.balances)               # __len__
+        self.balances.update({addr1: 50, addr2: 75})  # update()
+        
+        # ❌ THESE FAIL - Will raise NotImplementedError or AttributeError
+        keys = self.balances.keys()               # NOT IMPLEMENTED!
+        values = self.balances.values()           # NOT IMPLEMENTED!
+        items = self.balances.items()             # NOT IMPLEMENTED!
+        copy_dict = self.balances.copy()          # NOT IMPLEMENTED!
+        popped = self.balances.pop(address)       # NOT IMPLEMENTED!
+        item = self.balances.popitem()            # NOT IMPLEMENTED!
+        self.balances.clear()                     # NOT IMPLEMENTED!
+        default_val = self.balances.setdefault(address, 0)  # NOT IMPLEMENTED!
+        
+        # ❌ THESE FAIL - Trying to convert to Python dict
+        python_dict = dict(self.balances)         # WILL FAIL!
+        key_list = list(self.balances.keys())     # WILL FAIL!
+        
+        # ✅ WORKAROUNDS - Use supported operations instead
+        # Instead of .keys(), use membership testing:
+        for potential_key in known_addresses:
+            if potential_key in self.balances:
+                value = self.balances[potential_key]
+```
+
+### DequeContainer: What Works ✅ vs What Fails ❌
+
+```python
+@export  
+class ExampleContract(Blueprint):
+    history: list[str]  # This is DequeContainer!
+    
+    @public
+    def list_operations(self, ctx: Context) -> None:
+        # ✅ THESE WORK - Basic sequence operations
+        self.history.append("event")              # append()
+        self.history.extend(["a", "b", "c"])      # extend()
+        item = self.history[0]                    # __getitem__
+        self.history[0] = "new_item"              # __setitem__
+        length = len(self.history)                # __len__
+        
+        # ✅ THESE WORK - Deque-specific operations
+        self.history.appendleft("first")          # appendleft() 
+        self.history.extendleft(["x", "y"])       # extendleft()
+        first = self.history.popleft()            # popleft()
+        last = self.history.pop()                 # pop()
+        self.history.reverse()                    # reverse()
+        
+        # ✅ THESE WORK - Iteration
+        for item in self.history:                 # __iter__
+            pass
+        
+        # ❌ THESE FAIL - Will raise NotImplementedError
+        self.history.insert(1, "item")            # NOT IMPLEMENTED!
+        self.history.remove("item")               # NOT IMPLEMENTED!
+        self.history.sort()                       # NOT IMPLEMENTED!
+        index = self.history.index("item")        # NOT IMPLEMENTED!
+        count = self.history.count("item")        # NOT IMPLEMENTED!
+        copy_list = self.history.copy()           # NOT IMPLEMENTED!
+        
+        # ❌ THESE FAIL - Standard list methods
+        self.history.clear()                      # NOT IMPLEMENTED!
+        
+        # ❌ THESE FAIL - Trying to convert to Python list
+        python_list = list(self.history)          # MAY FAIL!
+        
+        # ✅ WORKAROUNDS - Use supported operations instead
+        # Instead of .index(), iterate manually:
+        for i, item in enumerate(self.history):
+            if item == "target":
+                found_index = i
+                break
+```
+
+### SetContainer: What Works ✅ vs What Fails ❌
+
+```python
+@export
+class ExampleContract(Blueprint):
+    members: set[Address]  # This is SetContainer!
+    
+    @public
+    def set_operations(self, ctx: Context) -> None:
+        address = ctx.get_caller_address()
+        other_addresses = [addr1, addr2, addr3]
+        
+        # ✅ THESE WORK - Basic set operations
+        self.members.add(address)                 # add()
+        self.members.discard(address)             # discard() (no error if missing)
+        self.members.remove(address)              # remove() (raises KeyError if missing)
+        self.members.update(other_addresses)      # update()
+        exists = address in self.members          # __contains__
+        length = len(self.members)                # __len__
+        
+        # ✅ THESE WORK - Some set operations
+        is_empty = self.members.isdisjoint(other_addresses)  # isdisjoint()
+        is_superset = self.members.issuperset(other_addresses)  # issuperset()
+        intersection = self.members.intersection(other_addresses)  # intersection()
+        self.members.difference_update(other_addresses)  # difference_update()
+        
+        # ❌ THESE FAIL - Will raise NotImplementedError  
+        copy_set = self.members.copy()            # NOT IMPLEMENTED!
+        union_set = self.members.union(other_addresses)  # NOT IMPLEMENTED!
+        diff_set = self.members.difference(other_addresses)  # NOT IMPLEMENTED!
+        sym_diff = self.members.symmetric_difference(other_addresses)  # NOT IMPLEMENTED!
+        subset = self.members.issubset(other_addresses)  # NOT IMPLEMENTED!
+        popped = self.members.pop()               # NOT IMPLEMENTED!
+        self.members.clear()                      # NOT IMPLEMENTED!
+        self.members.symmetric_difference_update(other_addresses)  # NOT IMPLEMENTED!
+        self.members.intersection_update(other_addresses)  # NOT IMPLEMENTED!
+        
+        # ❌ THESE FAIL - Set operators
+        union_op = self.members | other_set       # NOT IMPLEMENTED!
+        intersect_op = self.members & other_set   # NOT IMPLEMENTED!
+        diff_op = self.members - other_set        # NOT IMPLEMENTED!
+        
+        # ❌ THESE FAIL - Trying to convert to Python set
+        python_set = set(self.members)            # MAY FAIL!
+        
+        # ✅ WORKAROUNDS - Use supported operations instead
+        # Instead of .union(), add items manually:
+        for item in other_addresses:
+            self.members.add(item)
+```
+
+### Common Failure Patterns
+
+```python
+@export
+class BadExample(Blueprint):
+    data: dict[str, int]
+    items: list[str]  
+    tags: set[str]
+    
+    @public
+    def bad_operations(self, ctx: Context) -> None:
+        # ❌ ALL OF THESE WILL FAIL!
+        
+        # Dict failures
+        for key in self.data.keys():              # FAIL: .keys() not implemented
+            pass
+        all_values = list(self.data.values())     # FAIL: .values() not implemented  
+        dict_copy = self.data.copy()              # FAIL: .copy() not implemented
+        
+        # List failures  
+        self.items.sort()                         # FAIL: .sort() not implemented
+        self.items.insert(0, "first")             # FAIL: .insert() not implemented
+        self.items.remove("item")                 # FAIL: .remove() not implemented
+        
+        # Set failures
+        new_set = self.tags.copy()                # FAIL: .copy() not implemented
+        union_result = self.tags.union({"a"})     # FAIL: .union() not implemented
+        
+        # Conversion failures
+        py_dict = dict(self.data)                 # FAIL: Can't convert to Python dict
+        py_list = list(self.items)                # FAIL: May not work
+        py_set = set(self.tags)                   # FAIL: May not work
+
+@export 
+class GoodExample(Blueprint):
+    data: dict[str, int]
+    items: list[str]
+    tags: set[str]
+    
+    @public
+    def good_operations(self, ctx: Context) -> None:
+        # ✅ ALL OF THESE WORK!
+        
+        # Dict operations
+        self.data["key"] = 100
+        value = self.data.get("key", 0)
+        if "key" in self.data:
+            del self.data["key"]
+        
+        # List operations  
+        self.items.append("new")
+        self.items.appendleft("first")
+        last = self.items.pop()
+        first = self.items.popleft()
+        
+        # Set operations
+        self.tags.add("new_tag")
+        self.tags.discard("old_tag") 
+        if "tag" in self.tags:
+            self.tags.remove("tag")
+```
 
 
 ### Decorators Explained
@@ -1224,6 +1584,55 @@ class Counter(Blueprint):
         return self.count
 ```
 
+### Example 1b: Counter with Container Usage
+
+```python
+from hathor import Blueprint, public, view, Context, export, Address
+from typing import Optional
+
+@export  
+class CounterWithHistory(Blueprint):
+    count: int
+    # DequeContainer - behaves like deque, not list
+    history: list[str]
+    # DictContainer - specialized blockchain dict
+    user_counts: dict[Address, int]
+    # SetContainer - specialized blockchain set
+    authorized_users: set[Address]
+
+    @public
+    def initialize(self, ctx: Context, initial: int) -> None:
+        self.count = initial
+        # Initialize all containers (required!)
+        self.history = []                    # Empty DequeContainer
+        self.user_counts = {}               # Empty DictContainer
+        self.authorized_users = set()       # Empty SetContainer
+
+    @public
+    def increment(self, ctx: Context) -> None:
+        caller = ctx.get_caller_address()
+        if caller not in self.authorized_users:
+            self.authorized_users.add(caller)  # SetContainer.add()
+        
+        self.count += 1
+        
+        # DequeContainer operations (deque-like, not list-like)
+        self.history.append(f"Count incremented to {self.count}")
+        
+        # DictContainer operations
+        self.user_counts[caller] = self.user_counts.get(caller, 0) + 1
+
+    @view
+    def get_user_increment_count(self, user: Address) -> int:
+        # DictContainer.get() works like dict.get()
+        return self.user_counts.get(user, 0)
+    
+    @view
+    def is_authorized(self, user: Address) -> bool:
+        # SetContainer membership testing
+        return user in self.authorized_users
+```
+
 **Test File** (`/tests/test_counter.py`):
 ```python
 from hathor import make_nc_type_for_arg_type as make_nc_type
@@ -1276,13 +1685,13 @@ class ResultNotAvailable(NCFail):
 
 @export
 class Bet(Blueprint):
-    # Total bets per result
+    # Total bets per result (DictContainer, not Python dict)
     bets_total: dict[str, int]
 
-    # Bets per (result, address)
+    # Bets per (result, address) (DictContainer with tuple keys)
     bets_address: dict[tuple[str, Address], int]
 
-    # Withdrawals per address
+    # Withdrawals per address (DictContainer)
     withdrawals: dict[Address, int]
 
     # Total pool
@@ -1545,6 +1954,82 @@ from hathor import *                   # NO - wildcard imports forbidden
 
 ✅ CORRECT:
 from hathor import Blueprint, public, view, Context, export  # Explicit imports only
+```
+
+### Anti-Pattern 9: Misusing Container Types
+```python
+❌ WRONG: Assuming standard Python container behavior
+class BadContract(Blueprint):
+    balances: dict[Address, int]
+    
+    @public
+    def bad_method(self, ctx: Context) -> None:
+        # These operations may NOT work as expected!
+        keys = self.balances.keys()        # May not be implemented
+        values = list(self.balances.values())  # May not work
+        items = dict(self.balances.items())    # May not work
+        
+        # Wrong list operations
+        self.my_list.sort()               # Not implemented
+        self.my_list.insert(0, "item")    # Not implemented
+        
+        # Wrong set operations  
+        new_set = self.my_set.copy()      # Not implemented
+        union_set = self.my_set.union(other)  # Not implemented
+
+✅ CORRECT: Use supported container operations
+class GoodContract(Blueprint):
+    balances: dict[Address, int]
+    history: list[str]
+    members: set[Address]
+    
+    @public  
+    def good_method(self, ctx: Context) -> None:
+        # ✅ Use supported DictContainer operations
+        self.balances[address] = 100
+        balance = self.balances.get(address, 0)
+        if address in self.balances:
+            del self.balances[address]
+        
+        # ✅ Use supported DequeContainer operations  
+        self.history.append("new_event")
+        self.history.appendleft("urgent_event")
+        recent = self.history.pop()
+        
+        # ✅ Use supported SetContainer operations
+        self.members.add(address)
+        self.members.discard(address)
+        if address in self.members:
+            pass
+```
+
+### Anti-Pattern 10: Container Initialization Errors
+```python
+❌ WRONG: Not initializing containers
+class BadContract(Blueprint):
+    balances: dict[Address, int]
+    
+    @public
+    def initialize(self, ctx: Context) -> None:
+        # Missing container initialization!
+        pass
+    
+    @public
+    def use_balances(self, ctx: Context) -> None:
+        self.balances[ctx.get_caller_address()] = 100  # WILL FAIL!
+
+✅ CORRECT: Always initialize containers
+class GoodContract(Blueprint):
+    balances: dict[Address, int]
+    history: list[str]  
+    members: set[Address]
+    
+    @public
+    def initialize(self, ctx: Context) -> None:
+        # ✅ Initialize all declared containers
+        self.balances = {}      # Empty DictContainer
+        self.history = []       # Empty DequeContainer
+        self.members = set()    # Empty SetContainer
 ```
 """
 
