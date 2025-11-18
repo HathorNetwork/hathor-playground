@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Terminal, Trash2, AlertCircle, CheckCircle, Info, AlertTriangle, TestTube } from 'lucide-react';
 import { useIDEStore, ConsoleMessage, File } from '@/store/ide-store';
+import { beamClient } from '@/lib/beam-client';
 import { clsx } from 'clsx';
 
 interface ConsoleProps {
@@ -10,16 +11,61 @@ interface ConsoleProps {
 }
 
 export const Console: React.FC<ConsoleProps> = ({ onRunTests }) => {
-  const { consoleMessages, clearConsole, files, activeFileId, isRunningTests } = useIDEStore();
+  const { consoleMessages, clearConsole, files, activeFileId, isRunningTests, activeProjectId, addConsoleMessage } = useIDEStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const [isStreamingLogs, setIsStreamingLogs] = React.useState(false);
 
   const activeFile = files.find((f) => f.id === activeFileId);
 
+  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [consoleMessages]);
+
+  // Stream Beam logs when project is active
+  useEffect(() => {
+    if (!activeProjectId) {
+      setIsStreamingLogs(false);
+      return;
+    }
+
+    // Connect to log stream
+    console.log('Connecting to Beam log stream for project:', activeProjectId);
+    setIsStreamingLogs(true);
+
+    try {
+      eventSourceRef.current = beamClient.streamLogs(
+        activeProjectId,
+        (log) => {
+          // Add streamed log to console
+          addConsoleMessage('info', log);
+        },
+        (error) => {
+          console.error('Failed to stream logs:', error);
+          setIsStreamingLogs(false);
+          // Show user-friendly error message
+          addConsoleMessage('warning', 'Log streaming disconnected. Logs will appear when dev server is running.');
+        }
+      );
+    } catch (error) {
+      console.error('Error setting up log stream:', error);
+      setIsStreamingLogs(false);
+      addConsoleMessage('error', `Failed to setup log stream: ${error}`);
+    }
+
+    // Cleanup on unmount or project change
+    return () => {
+      if (eventSourceRef.current) {
+        console.log('Disconnecting from Beam log stream');
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+        setIsStreamingLogs(false);
+      }
+    };
+  }, [activeProjectId, addConsoleMessage]);
 
   const getIcon = (type: string) => {
     switch (type) {
@@ -62,6 +108,12 @@ export const Console: React.FC<ConsoleProps> = ({ onRunTests }) => {
         <div className="flex items-center gap-2">
           <Terminal size={16} />
           <span className="text-sm font-medium">Console</span>
+          {isStreamingLogs && (
+            <span className="flex items-center gap-1.5 text-xs text-green-400">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+              Streaming Beam Logs
+            </span>
+          )}
           {activeFile?.type === 'test' && (
             <button
               onClick={onRunTests}

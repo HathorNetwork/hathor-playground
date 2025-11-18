@@ -3,13 +3,15 @@
  * Handles persistent storage of files, chat history, and user preferences
  */
 
+export type FileType = 'contract' | 'test' | 'component' | 'hook' | 'style' | 'config';
+
 export interface StoredFile {
   id: string;
   name: string;
   content: string;
   lastModified: number;
   created: number;
-  type: 'contract' | 'test';
+  type: FileType;
 }
 
 export interface ChatMessage {

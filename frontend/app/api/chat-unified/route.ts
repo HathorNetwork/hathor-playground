@@ -1,0 +1,375 @@
+/**
+ * Unified AI Chat API Route - Blueprint Specialist
+ *
+ * Expert AI agent for developing, testing, and deploying Hathor Network nano contracts.
+ * System prompt: frontend/prompts/blueprint-specialist.md
+ *
+ * All tools execute client-side for maximum performance and security.
+ */
+
+import { streamText, tool, convertToCoreMessages, convertToModelMessages } from 'ai';
+import { z } from 'zod';
+import { getHathorAIModel, getHathorSystemPrompt } from '@/lib/server/ai-config';
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const model = getHathorAIModel();
+    const systemPrompt = getHathorSystemPrompt();
+
+    // Extract messages - DefaultChatTransport might send it differently
+    let rawMessages = body.messages || body;
+
+    // Ensure rawMessages is an array
+    if (!Array.isArray(rawMessages)) {
+      console.error('Invalid message format: expected array, got', typeof rawMessages);
+      throw new Error('Invalid message format: expected an array of messages');
+    }
+
+    // Check if messages are UIMessages (have 'parts' array) and need conversion
+    const hasUIMessageFormat = rawMessages.some((m: any) => m.parts || m.metadata);
+
+    let messages;
+    if (hasUIMessageFormat) {
+      // Manual conversion with proper output wrapping
+
+      const coreMessages: any[] = [];
+
+      for (const msg of rawMessages) {
+        if (msg.parts) {
+          // Extract text parts
+          const textParts = msg.parts
+            .filter((p: any) => p.type === 'text')
+            .map((p: any) => p.text);
+
+          // Extract tool parts (type="tool-<name>")
+          const toolParts = msg.parts.filter((p: any) => p.type?.startsWith('tool-'));
+
+          if (msg.role === 'assistant' && toolParts.length > 0) {
+            // Create assistant message with text and tool-calls
+            const toolCalls = toolParts.map((part: any) => {
+              const toolName = part.type.replace('tool-', '');
+              return {
+                type: 'tool-call',
+                toolCallId: part.toolCallId,
+                toolName: toolName,
+                args: part.input || {},
+              };
+            });
+
+            const content = textParts.length > 0 ? textParts.join('') : '';
+
+            coreMessages.push({
+              role: 'assistant',
+              content: [
+                ...(content ? [{ type: 'text', text: content }] : []),
+                ...toolCalls,
+              ],
+            });
+
+            // If tool parts have output (state=output-available), create tool result messages
+            for (const part of toolParts) {
+              if (part.state === 'output-available' && part.output !== undefined) {
+                const toolName = part.type.replace('tool-', '');
+
+                // CRITICAL FIX: Wrap output in the correct { type, value } schema
+                const wrappedOutput = typeof part.output === 'string'
+                  ? { type: 'text', value: part.output }
+                  : { type: 'json', value: part.output };
+
+                coreMessages.push({
+                  role: 'tool',
+                  content: [{
+                    type: 'tool-result',
+                    toolCallId: part.toolCallId,
+                    toolName: toolName,
+                    output: wrappedOutput,
+                  }],
+                });
+              }
+            }
+          } else {
+            // Regular message with text content
+            const content = textParts.join('');
+            if (content) {
+              coreMessages.push({
+                role: msg.role,
+                content: content,
+              });
+            }
+          }
+        } else {
+          // Message without parts (already in simple format)
+          if (msg.content) {
+            coreMessages.push({
+              role: msg.role,
+              content: msg.content,
+            });
+          }
+        }
+      }
+
+      messages = coreMessages;
+    } else {
+      // Messages are already in simple/core format
+      messages = rawMessages;
+    }
+
+    const result = streamText({
+      model,
+      messages,
+      system: systemPrompt,
+
+      tools: {
+        // ========== Shared Tools ==========
+
+        list_files: tool({
+          description: 'List files and directories in the project. IMPORTANT: Start with "/" to see the entire project structure, then explore subdirectories as needed.',
+          parameters: z.object({
+            path: z.string().describe('Directory path to list. Use "/" to see all files, or "/contracts/" or "/dapp/" for specific sections. Start with "/" when unsure what files exist.'),
+          }) as any,
+        } as any),
+
+        read_file: tool({
+          description: "Read a file's content by path",
+          parameters: z.object({
+            path: z.string().describe('File path to read'),
+          }),
+        }),
+
+        write_file: tool({
+          description: 'Create or update a file',
+          parameters: z.object({
+            path: z.string().describe('File path (must start with /blueprints/, /contracts/, /tests/, or /dapp/)'),
+            content: z.string().describe('Full file content'),
+          }),
+        }),
+
+        delete_file: tool({
+          description: 'Delete a file by path',
+          parameters: z.object({
+            path: z.string().describe('File path to delete'),
+          }),
+        } as any),
+
+        batch_write_files: tool({
+          description: 'Write multiple files in a single operation. More efficient than calling write_file multiple times. Use when creating/updating 3+ files at once. Returns detailed results for each file, including partial success handling.',
+          parameters: z.object({
+            files: z.array(z.object({
+              path: z.string().describe('File path (must start with /blueprints/, /contracts/, /tests/, or /dapp/)'),
+              content: z.string().describe('Full file content'),
+            })).describe('Array of files to write (max 50 files per batch)'),
+          }),
+        } as any),
+
+        batch_read_files: tool({
+          description: 'Read multiple files in a single operation. More efficient than calling read_file multiple times. Use when reading 3+ files to understand codebase structure. Returns detailed results for each file.',
+          parameters: z.object({
+            paths: z.array(z.string()).describe('Array of file paths to read (max 100 files per batch)'),
+          }),
+        } as any),
+
+        get_project_structure: tool({
+          description: 'Get hierarchical tree view of entire project with file types, sizes, and filtering options',
+          parameters: z.object({
+            filterByType: z.enum(['blueprints', 'tests', 'dapp', 'components', 'pages', 'configs']).optional().describe('Filter files by type (optional)'),
+          }),
+        }),
+
+        find_file: tool({
+          description: 'Find files by name pattern using fuzzy matching. Useful when user asks "find the Button component" or "where is page.tsx"',
+          parameters: z.object({
+            pattern: z.string().describe('File name pattern to search for (e.g., "Button", "page.tsx", "SimpleCounter")'),
+            searchPath: z.string().optional().describe('Optional: Limit search to specific directory path (e.g., "/dapp/")'),
+          }),
+        }),
+
+        get_file_dependencies: tool({
+          description: 'Analyze file dependencies - shows what a file imports and what files import it. Helps understand component relationships and dependencies.',
+          parameters: z.object({
+            filePath: z.string().describe('Path to the file to analyze (e.g., "/dapp/hathor-dapp/components/SimpleCounter.tsx")'),
+          }),
+        }),
+
+        analyze_component: tool({
+          description: 'Analyze a React component file - extracts component name, props, hooks usage, "use client" directive, and where it is used. Helps understand component structure and integration needs.',
+          parameters: z.object({
+            filePath: z.string().describe('Path to component file (must be .tsx or .jsx)'),
+          }),
+        }),
+
+        integrate_component: tool({
+          description: 'Automatically integrate a component into a page/route. Adds import statement and component usage. If componentPath is not provided, will auto-detect the component if only one exists in /dapp/components/. If targetPage is not specified, defaults to app/page.tsx. Use this after creating a new component to make it visible in the app.',
+          parameters: z.object({
+            componentPath: z.string().optional().describe('Path to the component file to integrate (e.g., "/dapp/components/SimpleCounter.tsx"). If not provided, will auto-detect if only one component exists in /dapp/components/.'),
+            targetPage: z.string().optional().describe('Optional: Target page path (defaults to app/page.tsx if not specified)'),
+          }),
+        }),
+
+        list_key_files: tool({
+          description: 'Summarize high-impact files (blueprints, tests, dApp) so you know where to focus first.',
+          parameters: z.object({}),
+        }),
+
+        search_symbol: tool({
+          description: 'Search for a symbol, class, or function name across the entire project.',
+          parameters: z.object({
+            query: z.string().describe('Symbol or identifier to search for (case-insensitive).'),
+            path: z.string().optional().describe('Optional directory scope, e.g., "/contracts" or "/dapp/components".'),
+          }),
+        }),
+
+        summarize_file: tool({
+          description: 'Summarize a file, including language, size, number of classes/functions, and a short snippet.',
+          parameters: z.object({
+            path: z.string().describe('Path to the file to summarize (e.g., /contracts/LiquidityPool.py).'),
+          }),
+        } as any),
+
+        // ========== Blueprint Tools ==========
+
+        validate_blueprint: tool({
+          description: 'Validate blueprint syntax and structure (static analysis)',
+          parameters: z.object({
+            path: z.string().describe('Path to blueprint file'),
+          }),
+        } as any),
+
+        list_methods: tool({
+          description: 'List all @public and @view methods in blueprint',
+          parameters: z.object({
+            path: z.string().describe('Path to blueprint file'),
+          }),
+        } as any),
+
+        compile_blueprint: tool({
+          description: 'Compile blueprint in browser using Pyodide',
+          parameters: z.object({
+            path: z.string().describe('Path to blueprint file'),
+          }),
+        } as any),
+
+        publish_blueprint: tool({
+          description: 'Publish a blueprint to the Hathor network on-chain using the Hathor Wallet API. Returns blueprint_id and nc_id (same for now) which can be used to create the manifest and configure the dApp.',
+          parameters: z.object({
+            blueprintPath: z.string().describe('Path to blueprint file (e.g., "/contracts/SimpleCounter.py")'),
+            address: z.string().describe('Hathor address that will sign the on-chain blueprint transaction (e.g., "WPhehTyNHTPz954CskfuSgLEfuKXbXeK3f")'),
+            walletId: z.string().optional().describe('Optional: Wallet ID (defaults to "playground" if not provided and HATHOR_WALLET_ID env var is not set)'),
+          }),
+        } as any),
+
+        execute_method: tool({
+          description: 'Execute a blueprint method (initialize, @public, or @view)',
+          parameters: z.object({
+            path: z.string().describe('Path to blueprint file'),
+            method_name: z.string().describe('Method name (e.g., "initialize", "increment")'),
+            args: z.array(z.any()).optional().describe('Method arguments (default: [])'),
+            caller_address: z.string().optional().describe('Caller address (optional)'),
+          }),
+        } as any),
+
+        run_tests: tool({
+          description: 'Run pytest tests in browser using Pyodide. IMPORTANT: test_path parameter is required.',
+          parameters: z.object({
+            test_path: z.string().describe('Path to test file (e.g., /tests/test_counter.py) - REQUIRED'),
+          }),
+        } as any),
+
+        // ========== dApp Tools (BEAM Sandbox) ==========
+
+        deploy_dapp: tool({
+          description: 'Deploy all /dapp/ files to BEAM sandbox. Creates sandbox if needed, uploads files, starts dev server.',
+          parameters: z.object({
+            _unused: z.string().optional().describe('No parameters needed'),
+          }),
+        } as any),
+
+        upload_files: tool({
+          description: 'Upload specific files to BEAM sandbox (for incremental updates)',
+          parameters: z.object({
+            paths: z.array(z.string()).describe('Array of file paths to upload (e.g., ["/dapp/app/page.tsx"])'),
+          }),
+        } as any),
+
+        get_sandbox_url: tool({
+          description: 'Get the live URL of the deployed dApp sandbox',
+          parameters: z.object({
+            _unused: z.string().optional().describe('No parameters needed'),
+          }),
+        } as any),
+
+        restart_dev_server: tool({
+          description: 'Restart the Next.js dev server in the sandbox',
+          parameters: z.object({
+            _unused: z.string().optional().describe('No parameters needed'),
+          }),
+        } as any),
+
+        bootstrap_nextjs: tool({
+          description: '⚠️ DEPRECATED: DO NOT USE for Hathor dApps! Use run_command with "npx create-hathor-dapp" instead. This creates a plain Next.js scaffold WITHOUT wallet integration, RPC support, or Hathor contexts.',
+          parameters: z.object({
+            use_typescript: z.boolean().optional().describe('Use TypeScript (default: true)'),
+            use_tailwind: z.boolean().optional().describe('Use Tailwind CSS (default: true)'),
+          }),
+        } as any),
+
+        run_command: tool({
+          description: 'Execute a shell command in the BEAM sandbox (e.g., npm install, npm run build)',
+          parameters: z.object({
+            command: z.string().describe('Shell command to execute'),
+          }),
+        } as any),
+
+      // Convenience tool to ensure correct scaffolding for Hathor dApps
+      create_hathor_dapp: tool({
+        description: 'Scaffold a new Hathor dApp in the BEAM sandbox using the official create-hathor-dapp template. This will generate a Next.js dApp with Hathor wallet integration and scaffolding.',
+        parameters: z.object({
+          app_name: z.string().optional().describe('Directory name for the app (default: "hathor-dapp")'),
+          wallet_connect_id: z.string().optional().describe('WalletConnect Project ID for Hathor wallet (defaults to recommended test project)'),
+          network: z.enum(['mainnet', 'testnet']).optional().describe('Hathor network (default: "testnet")'),
+        }),
+      } as any),
+
+        read_sandbox_files: tool({
+          description: 'Read files from BEAM sandbox back to IDE (two-way sync). Use after running commands that generate files.',
+          parameters: z.object({
+            path: z.string().optional().describe('Directory path to read from (default: /app)'),
+          }),
+        } as any),
+
+        get_sandbox_logs: tool({
+          description: 'Get recent logs from the sandbox dev server for debugging',
+          parameters: z.object({
+            lines: z.number().optional().describe('Number of log lines to retrieve (default: 50)'),
+          }),
+        } as any),
+
+        // ========== Two-Way Sync Tools ==========
+
+        sync_dapp: tool({
+          description: 'Two-way sync between IDE and BEAM sandbox. Handles additions, modifications, and deletions in both directions.',
+          parameters: z.object({
+            direction: z.enum(['ide-to-sandbox', 'sandbox-to-ide', 'bidirectional']).optional().describe('Sync direction (default: bidirectional)'),
+          }),
+        } as any),
+      },
+
+      // NO maxSteps - client handles multi-turn via sendAutomaticallyWhen
+      // The server just defines tools, client executes them via onToolCall
+      // Braintrust tracing is handled automatically via wrapAISDKModel()
+    });
+
+    return result.toUIMessageStreamResponse();
+  } catch (error: any) {
+    console.error('Chat API error:', error);
+    return new Response(
+      JSON.stringify({
+        error: error.message || 'Failed to process chat request',
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+}

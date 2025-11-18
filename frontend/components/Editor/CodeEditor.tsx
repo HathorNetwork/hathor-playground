@@ -1,12 +1,19 @@
 'use client';
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
 import { useIDEStore, File } from '@/store/ide-store';
 
-export const CodeEditor: React.FC = () => {
-  const editorRef = useRef<any>(null);
+interface CodeEditorProps {
+  editorRef?: React.MutableRefObject<any>;
+}
+
+export const CodeEditor: React.FC<CodeEditorProps> = ({ editorRef: externalEditorRef }) => {
+  const internalEditorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
+
+  // Use external ref if provided, otherwise use internal ref
+  const editorRef = externalEditorRef || internalEditorRef;
 
   const { files, activeFileId, updateFile } = useIDEStore();
   const activeFile = files.find((f: File) => f.id === activeFileId);
@@ -58,6 +65,49 @@ export const CodeEditor: React.FC = () => {
     editorRef.current = editor;
     monacoRef.current = monaco;
 
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      jsx: monaco.languages.typescript.JsxEmit.Preserve,
+      allowNonTsExtensions: true,
+      target: monaco.languages.typescript.ScriptTarget.ESNext,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+    });
+
+    // Define custom elegant theme
+    monaco.editor.defineTheme('elegant-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: '565f89', fontStyle: 'italic' },
+        { token: 'keyword', foreground: '7aa2f7', fontStyle: 'bold' },
+        { token: 'string', foreground: '9ece6a' },
+        { token: 'number', foreground: 'ff9e64' },
+        { token: 'decorator', foreground: '9d7cd8', fontStyle: 'bold' },
+        { token: 'identifier', foreground: 'c0caf5' },
+        { token: 'type', foreground: '7dcfff' },
+        { token: 'function', foreground: '7dcfff' },
+      ],
+      colors: {
+        'editor.background': '#1a1b26',
+        'editor.foreground': '#c0caf5',
+        'editor.lineHighlightBackground': '#24283b',
+        'editor.selectionBackground': '#3b4261',
+        'editor.inactiveSelectionBackground': '#2f3549',
+        'editorCursor.foreground': '#7aa2f7',
+        'editorWhitespace.foreground': '#3b4261',
+        'editorLineNumber.foreground': '#565f89',
+        'editorLineNumber.activeForeground': '#7aa2f7',
+        'editor.selectionHighlightBackground': '#3b426166',
+        'editor.wordHighlightBackground': '#3b426144',
+        'editor.findMatchBackground': '#7aa2f766',
+        'editor.findMatchHighlightBackground': '#7aa2f733',
+        'editorBracketMatch.background': '#3b426166',
+        'editorBracketMatch.border': '#7aa2f7',
+      },
+    });
+
+    // Apply the custom theme
+    monaco.editor.setTheme('elegant-dark');
+
     // Configure Python language features
     monaco.languages.registerCompletionItemProvider('python', {
       provideCompletionItems: (model, position) => {
@@ -105,6 +155,98 @@ export const CodeEditor: React.FC = () => {
         return { suggestions };
       },
     });
+
+    // Configure TypeScript/React autocomplete for Hathor dApp development
+    monaco.languages.registerCompletionItemProvider('typescript', {
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn
+        };
+
+        const suggestions = [
+          {
+            label: 'useInvokeSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const invokeSnap = useInvokeSnap();',
+            documentation: 'Hook to invoke Hathor Snap RPC methods',
+            range
+          },
+          {
+            label: 'useRequestSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const requestSnap = useRequestSnap();',
+            documentation: 'Hook to connect/install Hathor Snap',
+            range
+          },
+          {
+            label: 'htr_sendTransaction',
+            kind: monaco.languages.CompletionItemKind.Method,
+            insertText: `invokeSnap({
+  method: 'htr_sendTransaction',
+  params: {
+    network: 'mainnet',
+    outputs: [\${1}]
+  }
+})`,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Send HTR transaction',
+            range
+          },
+          {
+            label: 'htr_getBalance',
+            kind: monaco.languages.CompletionItemKind.Method,
+            insertText: `invokeSnap({
+  method: 'htr_getBalance',
+  params: {
+    network: 'mainnet',
+    tokens: ['00']
+  }
+})`,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Get wallet balance',
+            range
+          },
+        ];
+
+        return { suggestions };
+      },
+    });
+
+    // Same autocomplete for typescriptreact (TSX)
+    monaco.languages.registerCompletionItemProvider('typescriptreact', {
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn
+        };
+
+        const suggestions = [
+          {
+            label: 'useInvokeSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const invokeSnap = useInvokeSnap();',
+            documentation: 'Hook to invoke Hathor Snap RPC methods',
+            range
+          },
+          {
+            label: 'useRequestSnap',
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: 'const requestSnap = useRequestSnap();',
+            documentation: 'Hook to connect/install Hathor Snap',
+            range
+          },
+        ];
+
+        return { suggestions };
+      },
+    });
   };
 
   const handleChange = (value: string | undefined) => {
@@ -113,10 +255,42 @@ export const CodeEditor: React.FC = () => {
     }
   };
 
+  const monacoLanguage = useMemo(() => {
+    if (!activeFile) {
+      return 'plaintext';
+    }
+
+    switch (activeFile.language) {
+      case 'typescriptreact':
+        return 'typescript';
+      default:
+        return activeFile.language;
+    }
+  }, [activeFile]);
+
   if (!activeFile) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
-        <p>No file selected</p>
+      <div
+        className="flex flex-col items-center justify-center h-full"
+        style={{ background: 'var(--elegant-darkest)' }}
+      >
+        <div className="text-5xl mb-3 opacity-10">📝</div>
+        <p
+          className="font-mono text-base font-medium mb-1"
+          style={{
+            color: 'var(--text-secondary)',
+          }}
+        >
+          No file selected
+        </p>
+        <p
+          className="text-xs"
+          style={{
+            color: 'var(--text-muted)',
+          }}
+        >
+          Select a file from the explorer to begin
+        </p>
       </div>
     );
   }
@@ -126,11 +300,12 @@ export const CodeEditor: React.FC = () => {
       <Editor
         height="100%"
         defaultLanguage="python"
-        language={activeFile.language}
+        language={monacoLanguage}
+        path={activeFile.path || activeFile.id}
         value={activeFile.content}
         onChange={handleChange}
         onMount={handleEditorDidMount}
-        theme="vs-dark"
+        theme="elegant-dark"
         options={{
           minimap: { enabled: false },
           fontSize: 14,

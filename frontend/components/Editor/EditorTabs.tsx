@@ -50,30 +50,75 @@ export const EditorTabs: React.FC = () => {
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={openFileIds} strategy={() => null} >
-        <div className="flex bg-gray-800">
+        <div
+          className="flex overflow-x-auto scrollbar-thin"
+          style={{
+            background: 'var(--elegant-darkest)',
+            borderBottom: '1px solid var(--border-subtle)',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
           {openFileIds.map((fileId) => {
             const file = files.find((f) => f.id === fileId);
             if (!file) return null;
+
+            const isActive = activeFileId === file.id;
 
             return (
               <SortableTab key={file.id} id={file.id}>
                 <div
                   onClick={() => setActiveFile(file.id)}
                   className={clsx(
-                    'flex items-center gap-2 px-3 py-1 border-r border-gray-700 cursor-pointer',
-                    {
-                      'bg-gray-900 text-white': activeFileId === file.id,
-                      'bg-gray-800 text-gray-400 hover:bg-gray-700': activeFileId !== file.id,
-                    }
+                    'relative flex items-center gap-2.5 px-4 py-2.5 cursor-pointer transition-all duration-200 group',
+                    'border-r',
                   )}
+                  style={{
+                    background: isActive
+                      ? 'var(--elegant-medium)'
+                      : 'transparent',
+                    borderRightColor: 'var(--border-subtle)',
+                    borderTop: isActive ? '2px solid var(--accent-blue)' : '2px solid transparent',
+                    color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = 'var(--elegant-dark)';
+                      e.currentTarget.style.color = 'var(--text-secondary)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = 'var(--text-muted)';
+                    }
+                  }}
                 >
-                  <span className="text-sm">{file.name}</span>
+                  <span
+                    className={clsx('text-sm font-mono', {
+                      'font-semibold': isActive,
+                      'font-normal': !isActive,
+                    })}
+                  >
+                    {file.name}
+                  </span>
+
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       closeFile(file.id);
                     }}
-                    className="p-1 rounded-full hover:bg-gray-600"
+                    className="p-0.5 rounded transition-all duration-200 opacity-40 group-hover:opacity-100"
+                    style={{
+                      color: 'var(--text-muted)',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'var(--elegant-light)';
+                      e.currentTarget.style.color = 'var(--accent-red)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = 'var(--text-muted)';
+                    }}
                   >
                     <X size={14} />
                   </button>
