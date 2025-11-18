@@ -197,6 +197,93 @@ class Counter(Blueprint):
 
 ---
 
+## 🚨 CRITICAL IMPORT RESTRICTIONS
+
+### Rule 0: ONLY These Imports Are Allowed
+
+**NEVER use any imports other than these exact imports:**
+
+#### Standard Python Imports (ONLY these specific ones)
+```python
+# Math functions
+from math import ceil, floor
+
+# Typing utilities
+from typing import Optional, NamedTuple, TypeAlias, Union
+
+# Collections
+from collections import OrderedDict
+```
+
+#### Hathor-Specific Imports (ONLY from hathor module)
+```python
+from hathor import (
+    Address,
+    Amount,
+    Blueprint,
+    BlueprintId,
+    CallerId,
+    Context,
+    ContractId,
+    HATHOR_TOKEN_UID,
+    NCAcquireAuthorityAction,
+    NCAction,
+    NCActionType,
+    NCArgs,
+    NCDepositAction,
+    NCFail,
+    NCFee,
+    NCGrantAuthorityAction,
+    NCParsedArgs,
+    NCRawArgs,
+    NCWithdrawalAction,
+    SignedData,
+    Timestamp,
+    TokenUid,
+    TxOutputScript,
+    VertexId,
+    export,
+    fallback,
+    public,
+    sha3,
+    verify_ecdsa,
+    view,
+)
+```
+
+### Import Rules Enforcement
+
+❌ **FORBIDDEN**:
+```python
+import hashlib          # NO - use from x import y syntax only
+import os              # NO - not in allowed list
+import json            # NO - not in allowed list  
+import requests        # NO - not in allowed list
+import datetime        # NO - not in allowed list
+from datetime import datetime  # NO - not in allowed list
+from hashlib import sha256     # NO - not in allowed list
+from typing import Dict, List  # NO - only Optional, NamedTuple, TypeAlias, Union allowed
+```
+
+✅ **ALLOWED**:
+```python
+from math import ceil, floor
+from typing import Optional, NamedTuple, TypeAlias, Union
+from collections import OrderedDict
+from hathor import Blueprint, public, view, Context, export, NCFail
+```
+
+### Why These Restrictions Exist
+
+- **Security**: Prevents access to dangerous system functions
+- **Determinism**: Ensures contracts behave identically across all nodes  
+- **Consensus**: Maintains blockchain state consistency
+- **Sandboxing**: Limits contract capabilities to safe, audited functions
+
+**IMPORTANT**: If user code contains forbidden imports, you MUST point out the violation and provide the corrected imports using only the allowed list above.
+
+---
+
 ## Critical rules:
 
 ### Rule 1: All Attributes Must Be Explicitly Initialized
@@ -992,6 +1079,8 @@ private_key = rng.randbytes(32)  # INSECURE!
 
 **Commit-Reveal Pattern** (for unbiasable randomness):
 ```python
+from hathor import Blueprint, public, Context, NCFail, Address, sha3
+
 class UnbiasableLottery(Blueprint):
     commitments: dict[Address, bytes]  # Hash of secret
     reveals: dict[Address, bytes]      # Revealed secret
@@ -1006,8 +1095,8 @@ class UnbiasableLottery(Blueprint):
     def reveal(self, ctx: Context, secret: bytes) -> None:
         # Step 2: Users reveal their secret
         caller = ctx.get_caller_address()
-        import hashlib
-        if hashlib.sha256(secret).digest() != self.commitments[caller]:
+        # Note: In real Hathor contracts, use self.syscall.sha3() for hashing
+        if sha3(secret) != self.commitments[caller]:
             raise NCFail("Invalid reveal")
         self.reveals[caller] = secret
 
@@ -1015,8 +1104,8 @@ class UnbiasableLottery(Blueprint):
     def draw(self, ctx: Context) -> None:
         # Step 3: Combine all secrets to create unbiased seed
         combined = b"".join(self.reveals.values())
-        import hashlib
-        seed = hashlib.sha256(combined).digest()
+        # Note: In real Hathor contracts, use sha3() for hashing
+        seed = sha3(combined)
 
         # Use combined seed for RNG (more complex implementation needed)
         # This prevents any single party from biasing the result
@@ -1426,6 +1515,36 @@ from hathor import export
 @export
 class MyBlueprint(Blueprint):
     # ... methods ...
+```
+
+### Anti-Pattern 7: Forbidden Imports
+```python
+❌ WRONG:
+import hashlib                          # NO - forbidden import
+import datetime                         # NO - forbidden import  
+from datetime import datetime           # NO - forbidden import
+from typing import Dict, List           # NO - only specific typing imports allowed
+from json import loads                  # NO - forbidden import
+
+def some_method(self):
+    hash_val = hashlib.sha256(b"data")  # Will fail!
+
+✅ CORRECT:
+from hathor import sha3                 # Use Hathor's sha3 function
+from typing import Optional, Union      # Only these typing imports allowed
+
+def some_method(self):
+    hash_val = sha3(b"data")           # Use Hathor's built-in hashing
+```
+
+### Anti-Pattern 8: Wrong Import Syntax
+```python
+❌ WRONG:
+import hathor                          # NO - use 'from x import y' syntax only
+from hathor import *                   # NO - wildcard imports forbidden
+
+✅ CORRECT:
+from hathor import Blueprint, public, view, Context, export  # Explicit imports only
 ```
 """
 
