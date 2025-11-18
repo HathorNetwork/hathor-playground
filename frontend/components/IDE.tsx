@@ -60,8 +60,8 @@ export function IDE() {
   React.useEffect(() => {
     if (aiPanelRef.current && codePanelRef.current) {
       if (isAICollapsed) {
-        aiPanelRef.current.resize(3);
-        codePanelRef.current.resize(67);
+        aiPanelRef.current.collapse();
+        codePanelRef.current.resize(75);
       } else {
         aiPanelRef.current.resize(25);
         codePanelRef.current.resize(45);
@@ -239,7 +239,7 @@ export function IDE() {
             </PanelGroup>
           </Panel>
           <PanelResizeHandle className="w-1 bg-gray-800 hover:bg-blue-600 transition-colors" />
-          <Panel ref={aiPanelRef} defaultSize={25} minSize={3} maxSize={40}>
+          <Panel ref={aiPanelRef} defaultSize={25} minSize={0} maxSize={40}>
             <AIAssistant
               isCollapsed={isAICollapsed}
               onToggleCollapse={() => {
@@ -249,8 +249,8 @@ export function IDE() {
                 setTimeout(() => {
                   if (aiPanelRef.current && codePanelRef.current) {
                     if (newCollapsed) {
-                      aiPanelRef.current.resize(3);
-                      codePanelRef.current.resize(67);
+                      aiPanelRef.current.collapse();
+                      codePanelRef.current.resize(75);
                     } else {
                       aiPanelRef.current.resize(25);
                       codePanelRef.current.resize(45);

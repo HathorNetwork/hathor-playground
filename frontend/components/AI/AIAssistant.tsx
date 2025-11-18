@@ -245,10 +245,10 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isCollapsed, onToggleC
       <div className="h-full bg-gray-800 border-l border-gray-700 flex items-center justify-center">
         <button
           onClick={onToggleCollapse}
-          className="p-2 text-gray-400 hover:text-white transition-colors"
+          className="text-gray-400 hover:text-white transition-colors"
           title="Expand AI Assistant"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={16} />
         </button>
       </div>
     );
