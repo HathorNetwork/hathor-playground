@@ -21,10 +21,9 @@ export const FileExplorer: React.FC = () => {
         id: Date.now().toString(),
         name: fileName,
         content: showNewFileInput === 'contracts'
-          ? `from hathor.nanocontracts import Blueprint
-from hathor.nanocontracts.context import Context
-from hathor.nanocontracts.types import public, view
+          ? `from hathor import Blueprint, Context, public, view, export
 
+@export
 class ${cleanName}(Blueprint):
     """Your contract description here"""
     
@@ -35,8 +34,7 @@ class ${cleanName}(Blueprint):
     def initialize(self, ctx: Context) -> None:
         """Initialize the contract"""
         pass
-
-__blueprint__ = ${cleanName}`
+`
           : '',
         language: 'python',
         path: showNewFileInput === 'contracts' ? `/contracts/${fileName}` : `/tests/${fileName}`,
