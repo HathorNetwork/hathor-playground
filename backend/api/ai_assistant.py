@@ -204,8 +204,7 @@ def initialize(self, ctx: Context):
 ### Blueprint Structure
 
 ```python
-from hathor.nanocontracts import Blueprint, public, view
-from hathor.nanocontracts.context import Context
+from hathor import Blueprint, public, view, Context
 
 class MyBlueprint(Blueprint):
     # 1. FIELD DECLARATIONS (type annotations only)
@@ -337,7 +336,7 @@ The `@fallback` decorator creates a catch-all method for undefined method calls.
 - Special signature: `def fallback(self, ctx: Context, method_name: str, nc_args: NCArgs)`
 
 ```python
-from hathor.nanocontracts.types import NCArgs
+from hathor import NCArgs
 
 @fallback(allow_deposit=True)
 def fallback(self, ctx: Context, method_name: str, nc_args: NCArgs) -> None:
@@ -355,7 +354,7 @@ def fallback(self, ctx: Context, method_name: str, nc_args: NCArgs) -> None:
 #### Action Types Reference
 
 ```python
-from hathor.nanocontracts.types import NCActionType
+from hathor import NCActionType
 
 # Available action types:
 NCActionType.DEPOSIT           # Token deposits into contract
@@ -523,7 +522,7 @@ def multi_deposit(self, ctx: Context) -> None:
 ### Actions (Deposits & Withdrawals)
 
 ```python
-from hathor.nanocontracts.types import (
+from hathor import (
     NCDepositAction,
     NCWithdrawalAction,
     NCGrantAuthorityAction,
@@ -577,7 +576,7 @@ class TokenContract(Blueprint):
 ### Error Handling
 
 ```python
-from hathor.nanocontracts.exception import NCFail
+from hathor import NCFail
 
 # Define custom errors
 class InsufficientBalance(NCFail):
@@ -769,10 +768,10 @@ seed = rng.seed  # bytes (32 bytes)
 #### Real-World Example: Dice Game (from Hathor Labs)
 
 ```python
-from hathor.nanocontracts import Blueprint, public, view
-from hathor.nanocontracts.context import Context
-from hathor.nanocontracts.exception import NCFail
-from hathor.nanocontracts.types import Amount, CallerId
+from hathor import (
+    Blueprint, public, view, Context,
+    NCFail, Amount, CallerId
+)
 
 class HathorDice(Blueprint):
     \\\"\\\"\\\"Production dice game using self.syscall.rng for on-chain randomness.\\\"\\\"\\\"
@@ -930,12 +929,11 @@ class UnbiasableLottery(Blueprint):
 ### Test File Structure
 
 ```python
-from hathor.nanocontracts import Blueprint, public, view
-from hathor.nanocontracts.context import Context
-from hathor.nanocontracts.types import (
+from hathor import (
+    Blueprint, public, view, Context,
     Address, TokenUid, NCDepositAction, NCWithdrawalAction
 )
-from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
+from hathor import make_nc_type_for_arg_type as make_nc_type
 from tests.nanocontracts.blueprints.unittest import BlueprintTestCase
 
 # Type helpers for storage assertions
@@ -1014,8 +1012,7 @@ class MyBlueprintTest(BlueprintTestCase):
 ### Example 1: Simple Counter Blueprint
 
 ```python
-from hathor.nanocontracts import Blueprint, public, view
-from hathor.nanocontracts.context import Context
+from hathor import Blueprint, public, view, Context
 
 class Counter(Blueprint):
     count: int
@@ -1041,7 +1038,7 @@ __blueprint__ = Counter
 
 **Test File** (`/tests/test_counter.py`):
 ```python
-from hathor.nanocontracts.nc_types import make_nc_type_for_arg_type as make_nc_type
+from hathor import make_nc_type_for_arg_type as make_nc_type
 from tests.nanocontracts.blueprints.unittest import BlueprintTestCase
 
 INT_NC_TYPE = make_nc_type(int)
@@ -1074,9 +1071,8 @@ class CounterTest(BlueprintTestCase):
 
 ```python
 from typing import Optional
-from hathor.nanocontracts import Blueprint, public, view
-from hathor.nanocontracts.context import Context
-from hathor.nanocontracts.types import (
+from hathor import (
+    Blueprint, public, view, Context,
     Address, TokenUid, NCDepositAction, NCWithdrawalAction,
     SignedData, TxOutputScript, NCFail
 )
