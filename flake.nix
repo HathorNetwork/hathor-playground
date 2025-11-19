@@ -1,5 +1,5 @@
 {
-  description = "Hathor Playground - Node.js + Python Development Environment";
+  description = "Hathor Playground - Development Environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -34,15 +34,12 @@
             # --- Core Languages & Package Managers ---
             nodejs_24
             yarn-berry
-            python311
-            poetry
 
             # --- Task Runners ---
             just
 
             # --- Code Quality ---
             nixpkgs-fmt # Nix formatting
-            ruff # Python linting & formatting (fast!)
 
             # --- Debug & Development Utilities ---
             jq # JSON processor
@@ -65,12 +62,15 @@
             cmake
             gcc
             pkg-config
+
+            # --- Documentation & Python ---
+            (python3.withPackages (ps: with ps; [
+              mkdocs
+              mkdocs-material
+            ]))
           ];
 
           devshell.startup.shell-hook.text = ''
-            # Configure Poetry to use Python 3.11
-            poetry env use python3.11
-
             # Quick Reference
             echo ""
             echo "╔════════════════════════════════════════════════════════╗"
@@ -79,8 +79,6 @@
             echo ""
             echo "  Versions:"
             echo "    Node.js:  $(node --version)"
-            echo "    Python:   $(python3 --version | cut -d' ' -f2)"
-            echo "    Poetry:   $(poetry --version | cut -d' ' -f3)"
             echo ""
             echo "  Quick Commands (using just):"
             echo "    just install    Install dependencies"
@@ -90,6 +88,7 @@
             echo "    just lint       Lint code"
             echo "    just clean      Clean artifacts"
             echo "    just redis      Start Redis server"
+            echo "    just docs       Serve documentation"
             echo ""
             echo "  Manual Services:"
             echo "    Redis:  just redis  (or: redis-server)"
