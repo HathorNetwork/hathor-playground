@@ -103,6 +103,7 @@ class PyodideRunner {
       'structlog',
       'typing_extensions',
       'pydantic==1.10.14',  // Use v1 for compatibility with Hathor
+      'sortedcontainers',  // Required by intervaltree
       'intervaltree',
       'base58',
       'multidict',
