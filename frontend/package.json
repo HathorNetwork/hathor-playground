@@ -24,7 +24,7 @@
     "@types/diff": "^7.0.2",
     "axios": "^1.6.0",
     "clsx": "^2.0.0",
-    "diff": "^8.0.2",
+    "diff": "^8.0.3",
     "jquery": "^3.7.1",
     "lucide-react": "^0.292.0",
     "monaco-editor": "^0.44.0",
